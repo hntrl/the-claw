@@ -49,7 +49,16 @@ let noiseFloor = 0.004;
 function addLog(label, content) {
   const entry = document.createElement("div");
   entry.className = "entry";
-  entry.innerHTML = `<div class="label">${label}</div><div>${content}</div>`;
+
+  const labelDiv = document.createElement("div");
+  labelDiv.className = "label";
+  labelDiv.textContent = String(label);
+
+  const contentDiv = document.createElement("div");
+  contentDiv.textContent = String(content);
+
+  entry.appendChild(labelDiv);
+  entry.appendChild(contentDiv);
   logEl.prepend(entry);
 }
 
@@ -155,7 +164,7 @@ async function sendTurn(text) {
     addLog("Agent", data.reply);
     await speak(data.reply);
     if (Array.isArray(data.tool_events) && data.tool_events.length) {
-      addLog("Tools", `<pre>${JSON.stringify(data.tool_events, null, 2)}</pre>`);
+      addLog("Tools", JSON.stringify(data.tool_events, null, 2));
       fetchState();
     }
   } catch (err) {
