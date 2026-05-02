@@ -10,8 +10,6 @@ const manualInput = document.getElementById("manualInput");
 const sendBtn = document.getElementById("sendBtn");
 const speakToggleBtn = document.getElementById("speakToggleBtn");
 const clearBtn = document.getElementById("clearBtn");
-const agentHead = document.getElementById("agentHead");
-const agentModeLabel = document.getElementById("agentModeLabel");
 
 const sessionId = `web-${Math.random().toString(36).slice(2, 9)}`;
 
@@ -30,9 +28,10 @@ let recording = false;
 let speechHits = 0;
 let silenceHits = 0;
 let recordingStartedAt = 0;
+let pttHeld = false;
+let pttForcedRecording = false;
 let suppressUntil = 0;
 let activeAudio = null;
-let agentMode = "idle";
 
 const VAD_INTERVAL_MS = 100;
 const VAD_START_THRESHOLD = 0.012;
@@ -44,6 +43,7 @@ const POST_TTS_SUPPRESS_MS = 900;
 const MAX_UTTERANCE_MS = 7000;
 const NOISE_FLOOR_ALPHA = 0.08;
 const NOISE_FLOOR_MULTIPLIER = 2.8;
+const PUSH_TO_TALK_KEY = "F7";
 let noiseFloor = 0.004;
 
 function addLog(label, content) {
@@ -57,18 +57,9 @@ function setMicStatus(text) {
   micStatus.textContent = `Mic: ${text}`;
 }
 
-function setAgentMode(mode) {
-  agentMode = mode;
-  if (!agentHead || !agentModeLabel) return;
-  agentHead.classList.remove("idle", "listening", "thinking", "speaking");
-  agentHead.classList.add(mode);
-  agentModeLabel.textContent = `Agent: ${mode}`;
-}
-
 async function speak(text) {
   if (!speakEnabled) return;
   try {
-    setAgentMode("speaking");
     const resp = await fetch("/api/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -110,7 +101,6 @@ async function speak(text) {
       await new Promise((resolve) => {
         const utter = new SpeechSynthesisUtterance(text);
         utter.onstart = () => {
-          setAgentMode("speaking");
           suppressUntil = Date.now() + POST_TTS_SUPPRESS_MS;
         };
         utter.onend = () => resolve();
@@ -118,9 +108,6 @@ async function speak(text) {
         window.speechSynthesis.speak(utter);
       });
     }
-  } finally {
-    if (listening) setAgentMode("listening");
-    else setAgentMode("idle");
   }
 }
 
@@ -140,7 +127,6 @@ async function sendTurn(text) {
   processingTurn = true;
   addLog("You", cleaned);
   setMicStatus("processing");
-  setAgentMode("thinking");
   try {
     const resp = await fetch("/turn", {
       method: "POST",
@@ -163,7 +149,6 @@ async function sendTurn(text) {
   } finally {
     processingTurn = false;
     setMicStatus(listening ? "listening" : "idle");
-    if (!listening && agentMode !== "speaking") setAgentMode("idle");
   }
 }
 
@@ -190,15 +175,17 @@ async function transcribeBlob(blob) {
   return (data.text || "").trim();
 }
 
-function startRecording() {
-  if (!mediaRecorder || mediaRecorder.state !== "inactive" || processingTurn) return;
+function startRecording({ pushToTalk = false } = {}) {
+  if (!mediaRecorder || mediaRecorder.state !== "inactive" || processingTurn) return false;
   chunks = [];
   speechHits = 0;
   silenceHits = 0;
   recording = true;
+  pttForcedRecording = pushToTalk;
   recordingStartedAt = Date.now();
   mediaRecorder.start();
-  setMicStatus("recording speech");
+  setMicStatus(pushToTalk ? "recording (push-to-talk)" : "recording speech");
+  return true;
 }
 
 async function stopRecordingAndProcess() {
@@ -211,6 +198,7 @@ async function stopRecordingAndProcess() {
 function runVadTick() {
   if (!listening || processingTurn) return;
   if (Date.now() < suppressUntil) return;
+  if (pttHeld) return;
 
   const rms = getRms();
   if (!recording) {
@@ -264,10 +252,11 @@ async function initMic() {
     if (event.data && event.data.size > 0) chunks.push(event.data);
   };
   mediaRecorder.onstop = async () => {
+    pttForcedRecording = false;
     const blob = new Blob(chunks, { type: mediaRecorder.mimeType || "audio/webm" });
     chunks = [];
     if (blob.size < 1000 || Date.now() - recordingStartedAt < MIN_UTTERANCE_MS) {
-      setMicStatus("listening");
+      setMicStatus(listening ? "listening" : "idle");
       return;
     }
     try {
@@ -282,8 +271,8 @@ async function initMic() {
       addLog("Transcription Error", String(err));
       setMicStatus("transcription failed");
     } finally {
-      if (listening && !processingTurn) {
-        setMicStatus("listening");
+      if (!processingTurn) {
+        setMicStatus(listening ? "listening" : "idle");
       }
     }
   };
@@ -293,7 +282,6 @@ async function startListening() {
   await initMic();
   listening = true;
   setMicStatus("listening");
-  if (!processingTurn && agentMode !== "speaking") setAgentMode("listening");
   listenBtn.textContent = "Stop Listening";
   listenBtn.classList.add("active");
   if (vadTimer) clearInterval(vadTimer);
@@ -302,6 +290,8 @@ async function startListening() {
 
 function stopListening() {
   listening = false;
+  pttHeld = false;
+  pttForcedRecording = false;
   listenBtn.textContent = "Start Listening";
   listenBtn.classList.remove("active");
   if (vadTimer) {
@@ -310,7 +300,20 @@ function stopListening() {
   }
   if (recording) stopRecordingAndProcess();
   setMicStatus("idle");
-  if (!processingTurn && agentMode !== "speaking") setAgentMode("idle");
+}
+
+async function startPushToTalk() {
+  if (processingTurn) return;
+  if (recording && !pttForcedRecording) return;
+  await initMic();
+  pttHeld = true;
+  if (!recording) startRecording({ pushToTalk: true });
+}
+
+function stopPushToTalk() {
+  if (!pttHeld) return;
+  pttHeld = false;
+  if (recording && pttForcedRecording) stopRecordingAndProcess();
 }
 
 listenBtn.addEventListener("click", async () => {
@@ -367,6 +370,34 @@ manualInput.addEventListener("keydown", (event) => {
   }
 });
 
+window.addEventListener("keydown", async (event) => {
+  if (event.key !== PUSH_TO_TALK_KEY) return;
+  event.preventDefault();
+  if (event.repeat) return;
+  try {
+    await startPushToTalk();
+  } catch (err) {
+    pttHeld = false;
+    pttForcedRecording = false;
+    addLog("Mic Error", `Could not start push-to-talk: ${err}`);
+    setMicStatus("mic unavailable");
+  }
+});
+
+window.addEventListener("keyup", (event) => {
+  if (event.key !== PUSH_TO_TALK_KEY) return;
+  event.preventDefault();
+  stopPushToTalk();
+});
+
+window.addEventListener("blur", () => {
+  stopPushToTalk();
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) stopPushToTalk();
+});
+
 estopBtn.addEventListener("click", async () => {
   await fetch("/api/emergency-stop", { method: "POST" });
   addLog("System", "Emergency stop sent.");
@@ -383,4 +414,3 @@ refreshStateBtn.addEventListener("click", fetchState);
 
 fetchState();
 setInterval(fetchState, 3000);
-setAgentMode("idle");

@@ -47,96 +47,6 @@ body {
   display: block;
 }
 
-.agent-head {
-  margin-top: 0.9rem;
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.45rem;
-}
-
-.head-shell {
-  width: 132px;
-  height: 132px;
-  border-radius: 999px;
-  border: 2px solid #152b27;
-  background: linear-gradient(180deg, #f3f7f5 0%, #d8e8e2 100%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 8px 24px rgba(18, 34, 30, 0.24);
-}
-
-.eyes {
-  display: flex;
-  gap: 20px;
-  margin-bottom: 16px;
-}
-
-.eye {
-  width: 14px;
-  height: 14px;
-  border-radius: 999px;
-  background: #0f1d1b;
-}
-
-.mouth-wrap {
-  width: 56px;
-  height: 34px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.mouth {
-  width: 40px;
-  height: 8px;
-  border-radius: 999px;
-  background: #0f1d1b;
-  transform-origin: center center;
-}
-
-.agent-mode {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.9rem;
-}
-
-.agent-head.listening .head-shell {
-  box-shadow: 0 0 0 5px rgba(14, 124, 102, 0.15), 0 8px 24px rgba(18, 34, 30, 0.24);
-}
-
-.agent-head.thinking .head-shell {
-  animation: bob 0.9s ease-in-out infinite alternate;
-}
-
-.agent-head.speaking .mouth {
-  animation: talk 0.14s ease-in-out infinite alternate;
-}
-
-@keyframes talk {
-  from {
-    width: 18px;
-    height: 8px;
-    border-radius: 999px;
-  }
-  to {
-    width: 44px;
-    height: 22px;
-    border-radius: 12px;
-  }
-}
-
-@keyframes bob {
-  from {
-    transform: translateY(0);
-  }
-  to {
-    transform: translateY(-4px);
-  }
-}
-
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -194,6 +104,21 @@ body {
   margin: 0;
   color: var(--muted);
   font-size: 0.95rem;
+}
+
+.status.hint {
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+}
+
+kbd {
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  padding: 0.05rem 0.35rem;
+  background: #f8f5ee;
+  color: var(--text);
+  font-family: "Avenir Next", "Trebuchet MS", sans-serif;
 }
 
 pre {

@@ -72,6 +72,7 @@ Useful VAD tuning in `.env`:
 
 Features:
 - Start/stop continuous listening with VAD
+- Hold `F7` for push-to-talk (release to transcribe + send)
 - Manual text fallback input
 - Spoken agent replies from backend TTS (`/api/tts`, Cartesia by default)
 - Live machine state panel
