@@ -1,0 +1,17 @@
+node_modules
+packages/web/node_modules
+.env
+.env.*
+!.env.example
+packages/web/.env.local
+dist
+packages/web/dist
+.DS_Store
+.vite
+packages/web/.vite
+.pnpm-store/
+*.tsbuildinfo
+__pycache__/
+*.pyc
+vite.config.js
+vite.config.d.ts

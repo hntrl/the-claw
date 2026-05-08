@@ -1,0 +1,475 @@
+<div style="padding: 1rem 0;">
+  <h2 class="sr-only">Portrait orientation mockup of a voice-controlled claw machine display, with a generative FLAKE-style kaleidoscopic background filling the margins around CLAW-D, the robot character.</h2>
+
+  <div id="state-controls" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center;">
+    <button data-state="idle" class="st-btn">Idle</button>
+    <button data-state="listening" class="st-btn">Listening</button>
+    <button data-state="thinking" class="st-btn">Thinking</button>
+    <button data-state="executing" class="st-btn">Executing</button>
+    <button data-state="win" class="st-btn">Win</button>
+    <label style="margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--color-text-secondary);">
+      <input type="checkbox" id="auto-cycle" style="width: auto; height: auto;" />
+      Auto-cycle
+    </label>
+  </div>
+
+  <div style="display: flex; justify-content: center;">
+    <div id="screen" style="position: relative; width: 100%; max-width: 360px; aspect-ratio: 9/16; background: #07070c; border-radius: var(--border-radius-lg); overflow: hidden; border: 0.5px solid var(--color-border-tertiary);">
+
+      <canvas id="flake" style="position: absolute; inset: 0; width: 100%; height: 100%; display: block;"></canvas>
+
+      <svg id="claud" viewBox="-200 -260 400 520" preserveAspectRatio="xMidYMid meet" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 56%; max-width: 220px; z-index: 2; pointer-events: none;">
+        <ellipse id="shadow" cx="0" cy="170" rx="120" ry="14" fill="#000" opacity="0.45"/>
+
+        <g id="thoughts" opacity="0">
+          <circle cx="135" cy="-110" r="8" fill="#fff" opacity="0.85"/>
+          <circle cx="165" cy="-150" r="13" fill="#fff" opacity="0.9"/>
+          <circle cx="200" cy="-195" r="18" fill="#fff"/>
+        </g>
+
+        <g id="bob">
+          <g id="arms" opacity="0">
+            <circle id="arm-l" cx="-145" cy="-80" r="22" fill="#f4f1e8" stroke="#1a1a22" stroke-width="6"/>
+            <circle id="arm-r" cx="145" cy="-80" r="22" fill="#f4f1e8" stroke="#1a1a22" stroke-width="6"/>
+          </g>
+
+          <line x1="0" y1="-150" x2="0" y2="-205" stroke="#999" stroke-width="7" stroke-linecap="round"/>
+          <circle id="ant-glow" cx="0" cy="-215" r="28" fill="#A78BFA" opacity="0.4"/>
+          <circle id="ant-tip" cx="0" cy="-215" r="14" fill="#A78BFA" stroke="#1a1a22" stroke-width="5"/>
+
+          <rect x="-120" y="-150" width="240" height="230" rx="55" fill="#f4f1e8" stroke="#1a1a22" stroke-width="7"/>
+          <rect x="-90" y="-120" width="180" height="135" rx="34" fill="#1a1a22"/>
+
+          <ellipse id="eye-l" cx="-40" cy="-50" rx="27" ry="27" fill="#fff"/>
+          <ellipse id="eye-r" cx="40" cy="-50" rx="27" ry="27" fill="#fff"/>
+          <circle id="pupil-l" cx="-40" cy="-46" r="14" fill="#1a1a22"/>
+          <circle id="pupil-r" cx="40" cy="-46" r="14" fill="#1a1a22"/>
+
+          <g id="star-eyes" opacity="0">
+            <path d="M -40 -75 L -32 -57 L -14 -54 L -28 -42 L -24 -23 L -40 -32 L -56 -23 L -52 -42 L -66 -54 L -48 -57 Z" fill="#FFD24A" stroke="#1a1a22" stroke-width="2.5"/>
+            <path d="M 40 -75 L 48 -57 L 66 -54 L 52 -42 L 56 -23 L 40 -32 L 24 -23 L 28 -42 L 14 -54 L 32 -57 Z" fill="#FFD24A" stroke="#1a1a22" stroke-width="2.5"/>
+          </g>
+
+          <path id="mouth" d="M -25 18 Q 0 38 25 18" stroke="#fff" stroke-width="7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
+          <rect x="-117" y="35" width="9" height="36" rx="4" fill="#1a1a22"/>
+          <rect x="108" y="35" width="9" height="36" rx="4" fill="#1a1a22"/>
+
+          <circle cx="-78" cy="64" r="6" fill="#5DCAA5"/>
+          <circle cx="-58" cy="64" r="6" fill="#1a1a22" opacity="0.4"/>
+          <circle cx="-38" cy="64" r="6" fill="#1a1a22" opacity="0.4"/>
+        </g>
+      </svg>
+
+      <div id="transcript-zone" style="position: absolute; top: 16px; left: 14px; right: 14px; padding: 12px 14px; background: rgba(8,8,14,0.55); border: 0.5px solid rgba(255,255,255,0.08); border-radius: var(--border-radius-md); z-index: 3;">
+        <div style="font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.18em; color: rgba(255,255,255,0.6); margin-bottom: 4px;" id="transcript-tag">attract mode</div>
+        <div id="transcript-text" style="font-size: 22px; font-weight: 500; color: #ffffff; line-height: 1.1; letter-spacing: -0.01em; transition: font-size 0.3s ease;"></div>
+        <div id="transcript-sub" style="font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 4px; font-family: var(--font-mono);"></div>
+      </div>
+
+      <div id="telemetry-zone" style="position: absolute; bottom: 14px; left: 14px; right: 14px; padding: 10px 12px; background: rgba(8,8,14,0.6); border: 0.5px solid rgba(255,255,255,0.08); border-radius: var(--border-radius-md); display: grid; grid-template-columns: 1.3fr 0.7fr 0.6fr; gap: 10px; align-items: stretch; font-family: var(--font-mono); font-size: 10px; color: rgba(255,255,255,0.75); z-index: 3;">
+        <div style="display: flex; flex-direction: column; min-width: 0;">
+          <div style="opacity: 0.55; letter-spacing: 0.14em; margin-bottom: 4px;">claw-d.thoughts</div>
+          <div id="thoughts-feed" style="line-height: 1.4; height: 44px; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end;"></div>
+        </div>
+        <div style="display: flex; flex-direction: column;">
+          <div style="opacity: 0.55; letter-spacing: 0.14em; margin-bottom: 4px;">claw.pos</div>
+          <div style="position: relative; flex: 1; min-height: 44px; border: 0.5px solid rgba(255,255,255,0.25); border-radius: 3px;">
+            <div id="claw-dot" style="position: absolute; width: 7px; height: 7px; background: #fff; border-radius: 50%; transform: translate(-50%,-50%); transition: left 0.6s ease, top 0.6s ease; box-shadow: 0 0 6px rgba(255,255,255,0.9);"></div>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column; align-items: flex-end;">
+          <div style="opacity: 0.55; letter-spacing: 0.14em; margin-bottom: 4px;">caught</div>
+          <div id="caught-count" style="font-size: 22px; font-weight: 500; color: #fff; line-height: 1; margin-top: auto;">17</div>
+        </div>
+      </div>
+
+      <div id="confetti-overlay" style="position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 4;"></div>
+    </div>
+  </div>
+
+  <div style="margin-top: 10px; font-size: 13px; color: var(--color-text-secondary); line-height: 1.5; text-align: center;">
+    Portrait mockup. FLAKE-style kaleidoscopic pattern fills the margins; each state shifts symmetry, density, palette, and audio response.
+  </div>
+
+  <style>
+    .st-btn { font-size: 13px; padding: 6px 12px; }
+    .st-btn.active { background: var(--color-background-secondary); border-color: var(--color-border-primary); }
+    #bob { animation: bob var(--bob-dur, 3.5s) ease-in-out infinite; transform-origin: center; }
+    @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+    #ant-glow { animation: glow 1.6s ease-in-out infinite; transform-origin: center; }
+    @keyframes glow { 0%, 100% { opacity: 0.3; } 50% { opacity: 0.7; } }
+    .arms-wave { animation: armWave 0.45s ease-in-out infinite !important; transform-origin: center; }
+    @keyframes armWave { 0%, 100% { transform: translateY(-25px) rotate(-6deg); } 50% { transform: translateY(-45px) rotate(6deg); } }
+    .conf-piece { position: absolute; width: 8px; height: 14px; top: -20px; animation: confFall linear forwards; }
+    @keyframes confFall { to { transform: translateY(620px) rotate(720deg); opacity: 0; } }
+    ellipse { transition: rx 0.25s ease, ry 0.25s ease; }
+    circle, line { transition: fill 0.5s ease, stroke 0.5s ease; }
+    #pupil-l, #pupil-r { transition: cx 0.4s ease, cy 0.4s ease; }
+    #mouth { transition: d 0.3s ease, fill 0.3s ease; }
+  </style>
+
+  <script>
+    (function(){
+      const canvas = document.getElementById('flake');
+      const gl = canvas.getContext('webgl', { antialias: true });
+      let usingGL = !!gl;
+
+      const VS = "attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}";
+      const FS = `
+precision highp float;
+uniform vec2 u_res;
+uniform float u_time;
+uniform float u_audio;
+uniform vec3 u_colA;
+uniform vec3 u_colB;
+uniform vec3 u_colBg;
+uniform float u_sym;
+uniform float u_density;
+uniform float u_speed;
+uniform float u_hole;
+
+#define PI 3.14159265
+
+vec2 fold(vec2 p, float n){
+  float a = atan(p.y, p.x);
+  float r = length(p);
+  float seg = 2.0*PI / n;
+  a = mod(a + u_time*0.05*u_speed, seg);
+  a = abs(a - seg*0.5);
+  return vec2(cos(a), sin(a)) * r;
+}
+
+float sdCircle(vec2 p, float r){ return length(p) - r; }
+float sdBox(vec2 p, vec2 b){ vec2 d = abs(p) - b; return length(max(d,0.0)) + min(max(d.x,d.y),0.0); }
+float sdTriangle(vec2 p, float r){
+  const float k = 1.732;
+  p.x = abs(p.x) - r;
+  p.y = p.y + r/k;
+  if (p.x + k*p.y > 0.0) p = vec2(p.x - k*p.y, -k*p.x - p.y) / 2.0;
+  p.x -= clamp(p.x, -2.0*r, 0.0);
+  return -length(p) * sign(p.y);
+}
+float sdRing(vec2 p, float r, float w){ return abs(length(p) - r) - w; }
+mat2 rot(float a){ float c=cos(a), s=sin(a); return mat2(c,-s,s,c); }
+
+void main(){
+  vec2 uv = (gl_FragCoord.xy - 0.5*u_res) / min(u_res.x, u_res.y);
+  uv *= 1.5;
+  float r = length(uv);
+
+  vec2 fuv = fold(uv, u_sym);
+  vec2 tileUV = fuv * u_density;
+  vec2 cellId = floor(tileUV);
+  vec2 cellPos = fract(tileUV) - 0.5;
+
+  vec2 cellCenter = (cellId + 0.5) / u_density;
+  float cellRadius = length(cellCenter);
+
+  float baseSize = 0.45 - cellRadius * 0.5;
+  baseSize *= 0.65 + 0.35 * sin(cellRadius * 6.0 - u_time * u_speed);
+  baseSize *= 1.0 + u_audio * 0.45;
+  baseSize = clamp(baseSize, 0.0, 0.46);
+
+  float rotAngle = cellRadius * 5.0 + u_time * u_speed * 0.6 + u_audio * 1.5;
+  cellPos = rot(rotAngle) * cellPos;
+
+  float pick = mod(cellId.x * 7.0 + cellId.y * 3.0 + floor(u_time * 0.2), 4.0);
+  float d;
+  if (pick < 1.0){ d = sdCircle(cellPos, baseSize); }
+  else if (pick < 2.0){ d = sdTriangle(cellPos, baseSize); }
+  else if (pick < 3.0){ d = sdBox(cellPos, vec2(baseSize, baseSize) * 0.7); }
+  else { d = sdRing(cellPos, baseSize, 0.04 + 0.04*u_audio); }
+
+  float aa = 0.018;
+  float fill = smoothstep(aa, -aa, d);
+
+  vec3 col = mix(u_colA, u_colB, smoothstep(0.0, 0.65, cellRadius));
+
+  float centerMask = smoothstep(u_hole - 0.04, u_hole + 0.08, r);
+  float edgeMask = 1.0 - smoothstep(1.05, 1.5, r);
+
+  vec3 bg = u_colBg * (0.25 + edgeMask * 0.45);
+  vec3 finalCol = bg * (0.5 + 0.5*centerMask) + col * fill * centerMask * edgeMask * 0.95;
+
+  gl_FragColor = vec4(finalCol, 1.0);
+}`;
+
+      let prog, uRes, uTime, uAudio, uColA, uColB, uColBg, uSym, uDensity, uSpeed, uHole;
+      if (usingGL){
+        function compile(t,s){ const sh=gl.createShader(t); gl.shaderSource(sh,s); gl.compileShader(sh);
+          if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS)){console.warn(gl.getShaderInfoLog(sh)); usingGL=false;} return sh; }
+        const vs=compile(gl.VERTEX_SHADER, VS);
+        const fs=compile(gl.FRAGMENT_SHADER, FS);
+        if (usingGL){
+          prog=gl.createProgram(); gl.attachShader(prog,vs); gl.attachShader(prog,fs); gl.linkProgram(prog);
+          if(!gl.getProgramParameter(prog,gl.LINK_STATUS)){usingGL=false;}
+        }
+        if (usingGL){
+          gl.useProgram(prog);
+          const buf=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+          gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+          const loc=gl.getAttribLocation(prog,'a'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+          uRes=gl.getUniformLocation(prog,'u_res'); uTime=gl.getUniformLocation(prog,'u_time');
+          uAudio=gl.getUniformLocation(prog,'u_audio');
+          uColA=gl.getUniformLocation(prog,'u_colA'); uColB=gl.getUniformLocation(prog,'u_colB');
+          uColBg=gl.getUniformLocation(prog,'u_colBg');
+          uSym=gl.getUniformLocation(prog,'u_sym'); uDensity=gl.getUniformLocation(prog,'u_density');
+          uSpeed=gl.getUniformLocation(prog,'u_speed'); uHole=gl.getUniformLocation(prog,'u_hole');
+        }
+      }
+
+      function resize(){
+        const dpr = Math.min(window.devicePixelRatio||1, 2);
+        const w = canvas.clientWidth*dpr, h = canvas.clientHeight*dpr;
+        if (canvas.width !== w || canvas.height !== h){ canvas.width=w; canvas.height=h; if(usingGL) gl.viewport(0,0,w,h); }
+      }
+
+      const STATES = {
+        idle: {
+          tag:'attract mode', text:'Tell me what to grab.', sub:'try \u2192 "get me the dragon"',
+          thoughts:['claw-d v2.4 ready','shelf scan: 23 items','awaiting input...'], claw:[50,80],
+          fSym:6, fDen:8, fSpd:0.4, fHole:0.18,
+          fA:[0.45,0.40,0.85], fB:[0.85,0.75,1.00], fBG:[0.10,0.08,0.22],
+          ant:'#A78BFA',
+          mouthD:'M -25 18 Q 0 38 25 18', mouthFill:'none',
+          eyeRY:27, pupilDx:0, pupilDy:0,
+          showThoughts:false, showStars:false, showArms:false,
+          bobDur:'3.5s', textSize:22, dur:4500
+        },
+        listening: {
+          tag:'listening', text:'GET ME THE DRAGON', sub:'stt confidence: 96%',
+          thoughts:['mic open','transcribing...','tokens: get me the'], claw:[50,80],
+          fSym:8, fDen:10, fSpd:0.9, fHole:0.20,
+          fA:[0.20,0.85,0.80], fB:[0.85,1.00,0.95], fBG:[0.04,0.22,0.22],
+          ant:'#5DCAA5',
+          mouthD:'M -14 22 a 14 14 0 1 0 28 0 a 14 14 0 1 0 -28 0 Z', mouthFill:'#1a1a22',
+          eyeRY:32, pupilDx:0, pupilDy:5,
+          showThoughts:false, showStars:false, showArms:false,
+          bobDur:'1.6s', textSize:22, dur:3500
+        },
+        thinking: {
+          tag:'claw-d', text:'Hmm. Let me see...', sub:'planning grab path',
+          thoughts:['parsing intent','target: blue dragon','matched: row 2 col 4','planning trajectory...'], claw:[50,80],
+          fSym:12, fDen:13, fSpd:1.5, fHole:0.18,
+          fA:[1.00,0.55,0.20], fB:[1.00,0.85,0.45], fBG:[0.30,0.12,0.05],
+          ant:'#EF9F27',
+          mouthD:'M -18 20 q 9 -4 18 0', mouthFill:'none',
+          eyeRY:27, pupilDx:8, pupilDy:-9,
+          showThoughts:true, showStars:false, showArms:false,
+          bobDur:'2.4s', textSize:22, dur:2800
+        },
+        executing: {
+          tag:'executing', text:'Locked on.', sub:'claw moving to (2,4)',
+          thoughts:['x \u2192 64%','y \u2192 28%','descend on mark'], claw:[64,28],
+          fSym:4, fDen:6, fSpd:2.4, fHole:0.20,
+          fA:[1.00,0.30,0.20], fB:[1.00,0.75,0.35], fBG:[0.30,0.06,0.06],
+          ant:'#E24B4A',
+          mouthD:'M -18 20 Q 0 26 18 20', mouthFill:'none',
+          eyeRY:8, pupilDx:0, pupilDy:0,
+          showThoughts:false, showStars:false, showArms:false,
+          bobDur:'6s', textSize:24, dur:3500
+        },
+        win: {
+          tag:'caught', text:'BLUE DRAGON', sub:'#claw_d_2026',
+          thoughts:['grip confirmed','lift complete','drop to chute'], claw:[10,90],
+          fSym:8, fDen:14, fSpd:1.7, fHole:0.22,
+          fA:[1.00,0.75,0.25], fB:[1.00,0.40,0.80], fBG:[0.30,0.12,0.30],
+          ant:'#FFD24A',
+          mouthD:'M -32 8 Q 0 46 32 8', mouthFill:'#1a1a22',
+          eyeRY:27, pupilDx:0, pupilDy:0,
+          showThoughts:false, showStars:true, showArms:true,
+          bobDur:'0.5s', textSize:34, dur:4500
+        }
+      };
+
+      let currentState = 'idle';
+      let currentF = STATES.idle;
+      let targetF = STATES.idle;
+      let lerpT = 1;
+      let typingTimer = null;
+      const t0 = performance.now();
+
+      function $(id){ return document.getElementById(id); }
+      function lerp(a,b,t){ return a + (b-a)*t; }
+      function lerpArr(a,b,t){ return [lerp(a[0],b[0],t), lerp(a[1],b[1],t), lerp(a[2],b[2],t)]; }
+
+      function setState(name){
+        currentState = name;
+        const s = STATES[name];
+        targetF = s;
+        lerpT = 0;
+
+        $('transcript-tag').textContent = s.tag;
+        $('transcript-sub').textContent = s.sub;
+        const tt = $('transcript-text');
+        tt.style.fontSize = s.textSize + 'px';
+        if (typingTimer) clearInterval(typingTimer);
+        if (name === 'listening'){
+          tt.textContent = '';
+          let i = 0;
+          typingTimer = setInterval(() => {
+            i++;
+            tt.textContent = s.text.slice(0, i);
+            if (i >= s.text.length) clearInterval(typingTimer);
+          }, 65);
+        } else {
+          tt.textContent = s.text;
+        }
+
+        const tf = $('thoughts-feed');
+        tf.innerHTML = '';
+        s.thoughts.forEach((line, i) => {
+          const div = document.createElement('div');
+          div.style.opacity = i === s.thoughts.length-1 ? '1' : (0.4 + i*0.15);
+          div.textContent = '> ' + line;
+          tf.appendChild(div);
+        });
+
+        const dot = $('claw-dot');
+        dot.style.left = s.claw[0] + '%';
+        dot.style.top = s.claw[1] + '%';
+
+        $('ant-tip').setAttribute('fill', s.ant);
+        $('ant-glow').setAttribute('fill', s.ant);
+
+        const eyeL = $('eye-l'), eyeR = $('eye-r');
+        eyeL.setAttribute('ry', s.eyeRY);
+        eyeR.setAttribute('ry', s.eyeRY);
+
+        $('pupil-l').setAttribute('cx', -40 + s.pupilDx);
+        $('pupil-l').setAttribute('cy', -46 + s.pupilDy);
+        $('pupil-r').setAttribute('cx', 40 + s.pupilDx);
+        $('pupil-r').setAttribute('cy', -46 + s.pupilDy);
+
+        $('mouth').setAttribute('d', s.mouthD);
+        $('mouth').setAttribute('fill', s.mouthFill);
+
+        $('thoughts').setAttribute('opacity', s.showThoughts ? '1' : '0');
+        $('star-eyes').setAttribute('opacity', s.showStars ? '1' : '0');
+        const eyesOp = s.showStars ? '0' : '1';
+        eyeL.setAttribute('opacity', eyesOp);
+        eyeR.setAttribute('opacity', eyesOp);
+        $('pupil-l').setAttribute('opacity', eyesOp);
+        $('pupil-r').setAttribute('opacity', eyesOp);
+
+        const arms = $('arms');
+        arms.setAttribute('opacity', s.showArms ? '1' : '0');
+        if (s.showArms) arms.classList.add('arms-wave');
+        else arms.classList.remove('arms-wave');
+
+        document.documentElement.style.setProperty('--bob-dur', s.bobDur);
+
+        document.querySelectorAll('.st-btn').forEach(b => {
+          b.classList.toggle('active', b.dataset.state === name);
+        });
+
+        if (name === 'win'){
+          spawnConfetti();
+          $('caught-count').textContent = String(parseInt($('caught-count').textContent, 10) + 1);
+        }
+      }
+
+      function spawnConfetti(){
+        const c = $('confetti-overlay');
+        c.innerHTML = '';
+        const colors = ['#ff5fa2','#ffd24a','#5fd1ff','#a5ff7a','#ff8a4a','#c66bff'];
+        for (let i = 0; i < 45; i++){
+          const p = document.createElement('div');
+          p.className = 'conf-piece';
+          p.style.left = (Math.random()*100) + '%';
+          p.style.background = colors[i % colors.length];
+          p.style.animationDuration = (1.6 + Math.random()*1.6) + 's';
+          p.style.animationDelay = (Math.random()*0.7) + 's';
+          p.style.transform = 'rotate(' + (Math.random()*360) + 'deg)';
+          c.appendChild(p);
+        }
+      }
+
+      function render(){
+        resize();
+        const t = (performance.now() - t0) / 1000;
+
+        lerpT = Math.min(1, lerpT + 0.022);
+        const A = lerpArr(currentF.fA, targetF.fA, lerpT);
+        const B = lerpArr(currentF.fB, targetF.fB, lerpT);
+        const BG = lerpArr(currentF.fBG, targetF.fBG, lerpT);
+        const sym = lerp(currentF.fSym, targetF.fSym, lerpT);
+        const den = lerp(currentF.fDen, targetF.fDen, lerpT);
+        const spd = lerp(currentF.fSpd, targetF.fSpd, lerpT);
+        const hole = lerp(currentF.fHole, targetF.fHole, lerpT);
+        if (lerpT >= 1) currentF = targetF;
+
+        let baseAudio = 0.25, varAudio = 0.1, freq = 1.5;
+        if (currentState === 'listening'){ baseAudio = 0.45; varAudio = 0.4; freq = 5.0; }
+        else if (currentState === 'thinking'){ baseAudio = 0.30; varAudio = 0.15; freq = 7.0; }
+        else if (currentState === 'executing'){ baseAudio = 0.45; varAudio = 0.20; freq = 3.0; }
+        else if (currentState === 'win'){ baseAudio = 0.65; varAudio = 0.3; freq = 6.0; }
+        const audio = baseAudio + varAudio * (Math.sin(t*freq)*0.5 + 0.5) * (0.7 + Math.random()*0.3);
+
+        if (usingGL){
+          gl.uniform2f(uRes, canvas.width, canvas.height);
+          gl.uniform1f(uTime, t);
+          gl.uniform1f(uAudio, audio);
+          gl.uniform3fv(uColA, A);
+          gl.uniform3fv(uColB, B);
+          gl.uniform3fv(uColBg, BG);
+          gl.uniform1f(uSym, sym);
+          gl.uniform1f(uDensity, den);
+          gl.uniform1f(uSpeed, spd);
+          gl.uniform1f(uHole, hole);
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        }
+
+        requestAnimationFrame(render);
+      }
+
+      document.querySelectorAll('.st-btn').forEach(btn => {
+        btn.addEventListener('click', () => setState(btn.dataset.state));
+      });
+
+      let cycleTimer = null;
+      const order = ['idle','listening','thinking','executing','win'];
+      $('auto-cycle').addEventListener('change', (e) => {
+        if (e.target.checked){
+          let i = order.indexOf(currentState);
+          const tick = () => {
+            i = (i + 1) % order.length;
+            setState(order[i]);
+            cycleTimer = setTimeout(tick, STATES[order[i]].dur);
+          };
+          cycleTimer = setTimeout(tick, STATES[currentState].dur);
+        } else if (cycleTimer){ clearTimeout(cycleTimer); cycleTimer = null; }
+      });
+
+      function randomBlink(){
+        const eyeL = $('eye-l'), eyeR = $('eye-r');
+        if (currentState !== 'win' && currentState !== 'executing'){
+          eyeL.style.transform = 'scaleY(0.05)';
+          eyeR.style.transform = 'scaleY(0.05)';
+          eyeL.style.transformOrigin = '-40px -46px';
+          eyeR.style.transformOrigin = '40px -46px';
+          setTimeout(() => { eyeL.style.transform = ''; eyeR.style.transform = ''; }, 130);
+        }
+        setTimeout(randomBlink, 3500 + Math.random()*3500);
+      }
+      setTimeout(randomBlink, 2000);
+
+      function pupilWander(){
+        if (currentState === 'idle'){
+          const dx = (Math.random() - 0.5) * 12;
+          const dy = (Math.random() - 0.5) * 6;
+          $('pupil-l').setAttribute('cx', -40 + dx);
+          $('pupil-l').setAttribute('cy', -46 + dy);
+          $('pupil-r').setAttribute('cx', 40 + dx);
+          $('pupil-r').setAttribute('cy', -46 + dy);
+        }
+        setTimeout(pupilWander, 2200 + Math.random()*2000);
+      }
+      setTimeout(pupilWander, 1500);
+
+      setState('idle');
+      render();
+    })();
+  </script>
+</div>
