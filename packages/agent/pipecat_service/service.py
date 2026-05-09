@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 from collections.abc import Iterable
 from typing import Any
 
@@ -10,6 +9,8 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 
+from common.broadcaster import DisplayBroadcaster
+from common.claw_controller import ClawController, ClawControllerConfig
 from .frames import DisplayEventFrame, RawTextFrame, UtteranceFrame
 from .processors import (
     AgentProcessor,
@@ -20,41 +21,6 @@ from .processors import (
     TTSSpeakProcessor,
     VoiceStartProcessor,
 )
-
-
-class DisplayBroadcaster:
-    def __init__(self) -> None:
-        self._clients: set[Any] = set()
-        self._lock = asyncio.Lock()
-
-    async def add_client(self, websocket: Any) -> None:
-        async with self._lock:
-            self._clients.add(websocket)
-
-    async def remove_client(self, websocket: Any) -> None:
-        async with self._lock:
-            self._clients.discard(websocket)
-
-    async def broadcast(self, payload: dict[str, Any]) -> None:
-        message = json.dumps(payload)
-        async with self._lock:
-            clients = list(self._clients)
-
-        stale: list[Any] = []
-        for client in clients:
-            try:
-                await client.send(message)
-            except Exception:
-                stale.append(client)
-
-        if stale:
-            async with self._lock:
-                for client in stale:
-                    self._clients.discard(client)
-
-    async def snapshot_clients(self) -> Iterable[Any]:
-        async with self._lock:
-            return tuple(self._clients)
 
 
 class ExecutionControl:
@@ -133,6 +99,9 @@ class PipecatClawVoiceService:
         self._queue_lock = asyncio.Lock()
         self._control = ExecutionControl()
         self._emitter = PipelineEmitter(broadcaster, self._control)
+        self._claw_controller = ClawController(
+            ClawControllerConfig.from_env(success_rate=success_rate)
+        )
         self._runner = PipelineRunner()
         self._runner_task: asyncio.Task[None] | None = None
 
@@ -140,7 +109,7 @@ class PipecatClawVoiceService:
             [
                 VoiceStartProcessor(self._emitter),
                 SpeechToTextProcessor(self._emitter),
-                AgentProcessor(self._emitter, success_rate=success_rate),
+                AgentProcessor(self._emitter, self._claw_controller),
                 CartesiaMarkupProcessor(self._emitter),
                 TTSSpeakProcessor(self._emitter),
                 DisplayEventDispatchProcessor(self._emitter),
@@ -171,6 +140,7 @@ class PipecatClawVoiceService:
             self._runner_task = None
         if self._runner_task is not None:
             return
+        await self._claw_controller.start()
         self._runner_task = asyncio.create_task(self._runner.run(self._task))
 
     async def stop(self) -> None:
@@ -179,6 +149,7 @@ class PipecatClawVoiceService:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._runner_task
             self._runner_task = None
+        await self._claw_controller.stop()
 
     async def submit_utterance(self, text: str, *, source: str = "stdin") -> None:
         await self._submit_text_frame(text, UtteranceFrame, source=source)

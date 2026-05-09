@@ -34,11 +34,15 @@ just web-dev
 just web-build
 just web-mock
 just agent-dev
+just agent-realtime
 just agent-demo
 just agent-mic
+just agent-realtime-mic
 just old-dev
 just old-cli
+just demo-realtime
 just demo-mic
+just demo-realtime-mic
 just demo-mock
 ```
 

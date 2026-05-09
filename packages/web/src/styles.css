@@ -59,6 +59,56 @@ body {
   transform: translateY(-50%);
 }
 
+.mic-toggle {
+  position: fixed;
+  top: clamp(10px, 1.6vw, 20px);
+  left: clamp(10px, 1.6vw, 20px);
+  z-index: 85;
+  min-width: 92px;
+  min-height: 34px;
+  padding: 0 12px;
+  color: rgba(238, 250, 255, 0.84);
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(0, 0, 0, 0.72);
+  border: 1px solid rgba(238, 250, 255, 0.2);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.mic-toggle:hover:not(:disabled) {
+  border-color: rgba(238, 250, 255, 0.7);
+}
+
+.mic-toggle.is-live {
+  color: rgba(0, 0, 0, 0.9);
+  background: rgba(120, 245, 255, 0.92);
+  border-color: rgba(199, 255, 255, 0.9);
+}
+
+.mic-toggle:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.mic-error {
+  position: fixed;
+  top: calc(clamp(10px, 1.6vw, 20px) + 40px);
+  left: clamp(10px, 1.6vw, 20px);
+  z-index: 85;
+  max-width: min(48vw, 320px);
+  margin: 0;
+  padding: 6px 8px;
+  color: rgba(255, 159, 180, 0.92);
+  font-size: 11px;
+  line-height: 1.35;
+  background: rgba(0, 0, 0, 0.68);
+  border: 1px solid rgba(255, 131, 163, 0.36);
+  border-radius: 8px;
+}
+
 .field-debug-panel__eyebrow {
   margin-bottom: 8px;
   color: rgba(238, 250, 255, 0.56);

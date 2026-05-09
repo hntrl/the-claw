@@ -390,6 +390,16 @@ const drawSignalField = (
   context.restore();
 };
 
+const drawBaseBackground = (
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  _mode: BackgroundMode,
+) => {
+  context.fillStyle = "#f7f7f2";
+  context.fillRect(0, 0, width, height);
+};
+
 const drawWarped = (
   context: CanvasRenderingContext2D,
   source: HTMLCanvasElement,
@@ -751,8 +761,7 @@ export const VectorCRTCanvas = ({ mood, keyboardOverlay }: VectorCRTCanvasProps)
       const font = `"Courier Prime", "IBM Plex Mono", "Courier New", monospace`;
 
       sourceContext.clearRect(0, 0, width, height);
-      sourceContext.fillStyle = "#f7f7f2";
-      sourceContext.fillRect(0, 0, width, height);
+      drawBaseBackground(sourceContext, width, height, renderState.visual.backgroundMode);
 
       const haze = sourceContext.createRadialGradient(width * 0.5, height * 0.45, 0, width * 0.5, height * 0.46, height * 0.7);
       haze.addColorStop(0, "rgba(142, 200, 255, 0.11)");

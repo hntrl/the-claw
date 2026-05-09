@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import os
 import time
@@ -43,6 +44,16 @@ class MicConfig:
     preroll_frames: int = int(os.getenv("VAD_PREROLL_FRAMES", "8"))
     min_utterance_seconds: float = float(os.getenv("MIN_UTTERANCE_SECONDS", "0.5"))
     transcribe_model: str = os.getenv("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
+    input_device: str | int | None = os.getenv("AGENT_AUDIO_INPUT_DEVICE", "").strip() or None
+    barge_in_enabled: bool = os.getenv("AGENT_ENABLE_BARGE_IN", "1").strip().lower() not in {"0", "false", "no"}
+    barge_in_min_speech_frames: int = int(os.getenv("BARGE_IN_MIN_SPEECH_FRAMES", "0"))
+
+    def __post_init__(self) -> None:
+        if isinstance(self.input_device, str):
+            with contextlib.suppress(ValueError):
+                self.input_device = int(self.input_device)
+        if self.barge_in_min_speech_frames <= 0:
+            self.barge_in_min_speech_frames = self.min_speech_frames
 
     @property
     def frame_samples(self) -> int:
@@ -58,8 +69,10 @@ def listen_for_utterance(
     pre_roll = deque(maxlen=config.preroll_frames)
     speech_frames: list[np.ndarray] = []
     speech_hits = 0
+    barge_hits = 0
     silence_hits = 0
     in_speech = False
+    barge_notified = False
     deadline = time.monotonic() + config.max_record_seconds
 
     with sd.InputStream(
@@ -67,6 +80,7 @@ def listen_for_utterance(
         channels=1,
         dtype="int16",
         blocksize=config.frame_samples,
+        device=config.input_device,
     ) as stream:
         while time.monotonic() < deadline:
             if should_stop and should_stop():
@@ -80,13 +94,25 @@ def listen_for_utterance(
             if not in_speech:
                 if energy >= config.start_threshold:
                     speech_hits += 1
+                    barge_hits += 1
                 else:
                     speech_hits = max(0, speech_hits - 1)
+                    barge_hits = max(0, barge_hits - 1)
+
+                if (
+                    on_speech_start
+                    and config.barge_in_enabled
+                    and not barge_notified
+                    and barge_hits >= config.barge_in_min_speech_frames
+                ):
+                    barge_notified = True
+                    on_speech_start()
 
                 if speech_hits >= config.min_speech_frames:
                     in_speech = True
                     speech_frames.extend(list(pre_roll))
-                    if on_speech_start:
+                    if on_speech_start and config.barge_in_enabled and not barge_notified:
+                        barge_notified = True
                         on_speech_start()
             else:
                 speech_frames.append(mono)

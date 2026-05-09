@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { DebugFieldPanel } from "./components/DebugFieldPanel";
 import { VerticalTVFrame } from "./components/VerticalTVFrame";
 import { VectorCRTCanvas } from "./components/VectorCRTCanvas";
+import { useClientMicStream } from "./hooks/useClientMicStream";
 import { useKeyboardDebug } from "./hooks/useKeyboardDebug";
 import { useDisplaySocket } from "./hooks/useDisplaySocket";
 import { useKeyboardTextInput } from "./hooks/useKeyboardTextInput";
@@ -23,7 +24,8 @@ function App() {
   }, []);
 
   useKeyboardDebug();
-  const sendRawText = useDisplaySocket();
+  const { sendRawText, sendAudioChunk } = useDisplaySocket();
+  const mic = useClientMicStream(sendAudioChunk);
   const keyboardOverlay = useKeyboardTextInput(sendRawText);
 
   return (
@@ -31,6 +33,16 @@ function App() {
       <VerticalTVFrame>
         <VectorCRTCanvas mood={moodOverride} keyboardOverlay={keyboardOverlay} />
       </VerticalTVFrame>
+      <button
+        aria-label={mic.muted ? "Unmute microphone" : "Mute microphone"}
+        className={`mic-toggle ${mic.muted ? "is-muted" : "is-live"}`}
+        disabled={!mic.supported}
+        onClick={mic.toggleMuted}
+        type="button"
+      >
+        {mic.supported ? (mic.muted ? "MIC OFF" : "MIC ON") : "MIC N/A"}
+      </button>
+      {mic.error ? <p className="mic-error">{mic.error}</p> : null}
       <DebugFieldPanel />
     </>
   );

@@ -27,6 +27,19 @@ export const useDisplaySocket = () => {
     return true;
   }, []);
 
+  const sendAudioChunk = useCallback((chunk: Uint8Array): boolean => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    const payload = chunk.buffer.slice(
+      chunk.byteOffset,
+      chunk.byteOffset + chunk.byteLength,
+    );
+    ws.send(payload);
+    return true;
+  }, []);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const wsFromQuery = params.get("ws");
@@ -99,5 +112,5 @@ export const useDisplaySocket = () => {
     };
   }, [applyEvent, setWsStatus]);
 
-  return sendRawText;
+  return { sendRawText, sendAudioChunk };
 };

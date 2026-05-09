@@ -11,10 +11,11 @@ from typing import Any, Protocol
 from langchain.agents import create_agent
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
-import sounddevice as sd
 from pipecat.frames.frames import Frame, InterimTranscriptionFrame, TranscriptionFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
+from common.audio_output import LocalAudioOutput
+from common.claw_controller import ClawController
 from .frames import (
     AgentReplyFrame,
     AssistantSpeechFrame,
@@ -338,21 +339,15 @@ class AgentProcessor(BaseDisplayProcessor):
     def __init__(
         self,
         emitter: DisplayEmitter,
+        claw_controller: ClawController,
         *,
         model: str | None = None,
         max_turns: int = 6,
-        motion_delay_ms: int = 420,
-        settle_delay_ms: int = 340,
-        reset_to_attract_ms: int = 1200,
-        success_rate: float = 0.68,
     ) -> None:
         super().__init__(emitter)
+        self._claw_controller = claw_controller
         self._model = model or os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
         self._max_turns = max_turns
-        self._motion_delay_s = motion_delay_ms / 1000
-        self._settle_delay_s = settle_delay_ms / 1000
-        self._reset_delay_s = reset_to_attract_ms / 1000
-        self._success_rate = success_rate
         self._system_prompt = (
             "You are the claw machine orchestration agent. "
             "Given user transcription text, call tools to reason and act. "
@@ -574,19 +569,8 @@ class AgentProcessor(BaseDisplayProcessor):
             "ok": True,
             "target_label": target_label,
             "motions": motions,
-            "estimated_duration_s": round(len(motions) * self._motion_delay_s, 2),
+            "estimated_duration_s": self._claw_controller.estimate_duration_s(motions),
         }
-
-    async def _sleep_or_interrupt(self, delay_s: float) -> bool:
-        slice_s = 0.05
-        remaining = delay_s
-        while remaining > 0:
-            if await self._emitter.should_interrupt():
-                return True
-            current = min(slice_s, remaining)
-            await asyncio.sleep(current)
-            remaining -= current
-        return await self._emitter.should_interrupt()
 
     async def _tool_execute_claw(self, arguments: dict[str, Any], *, turn_state: dict[str, Any]) -> dict[str, Any]:
         target_label = str(arguments.get("target_label") or turn_state["target_label"]).strip() or turn_state["target_label"]
@@ -603,58 +587,37 @@ class AgentProcessor(BaseDisplayProcessor):
 
         await self._emitter.set_executing(True)
         try:
-            await self._emit({"type": "state", "state": "moving"})
             await self._emit_step("claw_execute", "active")
 
-            emitted_drop_state = False
-            for motion in motions:
-                if await self._emitter.should_interrupt():
-                    await self._emit_step("claw_execute", "pending")
-                    await self._emit_step("result_evaluate", "pending")
-                    return {"ok": False, "interrupted": True}
-
-                if motion == "down" and not emitted_drop_state:
-                    emitted_drop_state = True
-                    await self._emit({"type": "state", "state": "dropping"})
-                    await self._emit({"type": "effect", "effect": "dropStarted"})
-
-                await self._emit(
-                    {
-                        "type": "claw_motion",
-                        "direction": motion,
-                        "speed": 0.55 if motion == "down" else 0.8,
-                    }
-                )
-                if await self._sleep_or_interrupt(self._motion_delay_s):
-                    await self._emit_step("claw_execute", "pending")
-                    await self._emit_step("result_evaluate", "pending")
-                    return {"ok": False, "interrupted": True}
-
-            if not emitted_drop_state:
-                await self._emit({"type": "state", "state": "dropping"})
-                await self._emit({"type": "effect", "effect": "dropStarted"})
-                if await self._sleep_or_interrupt(self._settle_delay_s):
-                    await self._emit_step("claw_execute", "pending")
-                    await self._emit_step("result_evaluate", "pending")
-                    return {"ok": False, "interrupted": True}
+            execution = await self._claw_controller.execute_plan(
+                target_label=target_label,
+                motions=motions,
+                should_interrupt=self._emitter.should_interrupt,
+                on_event=self._emit,
+            )
+            if execution.interrupted:
+                await self._emit_step("claw_execute", "pending")
+                await self._emit_step("result_evaluate", "pending")
+                return {"ok": False, "interrupted": True}
+            if not execution.ok:
+                await self._emit_step("claw_execute", "error")
+                await self._emit_step("result_evaluate", "error")
+                return {
+                    "ok": False,
+                    "interrupted": False,
+                    "error": execution.error or "controller_error",
+                }
 
             await self._emit_step("claw_execute", "complete")
             await self._emit_step("result_evaluate", "active")
-            if await self._sleep_or_interrupt(self._settle_delay_s):
-                await self._emit_step("result_evaluate", "pending")
-                return {"ok": False, "interrupted": True}
-
             await self._emit_step("result_evaluate", "complete")
-
-            if not await self._sleep_or_interrupt(self._reset_delay_s):
-                await self._emit({"type": "state", "state": "attract"})
 
             return {
                 "ok": True,
                 "interrupted": False,
                 "target_label": target_label,
                 "motions": motions,
-                "outcome": "pending",
+                "outcome": execution.outcome,
             }
         finally:
             await self._emitter.clear_interrupt()
@@ -674,6 +637,7 @@ class TTSSpeakProcessor(BaseDisplayProcessor):
         self._cartesia_language = os.getenv("CARTESIA_LANGUAGE", "en").strip() or "en"
         self._cartesia_sample_rate = int(os.getenv("CARTESIA_SAMPLE_RATE", "44100"))
         self._cartesia_client: Any | None = None
+        self._audio_output = LocalAudioOutput()
         self._warned_disabled = False
         self._warned_missing_key = False
         self._warned_import = False
@@ -732,7 +696,6 @@ class TTSSpeakProcessor(BaseDisplayProcessor):
             await self._emitter.clear_tts_task(task)
 
     async def _stream_and_play(self, client: Any, tagged_text: str) -> None:
-        stream: sd.RawOutputStream | None = None
         wrote_audio = False
         try:
             async with client.tts.websocket_connect() as connection:
@@ -748,13 +711,6 @@ class TTSSpeakProcessor(BaseDisplayProcessor):
                 )
                 await ctx.push(tagged_text)
                 await ctx.no_more_inputs()
-
-                stream = sd.RawOutputStream(
-                    samplerate=self._cartesia_sample_rate,
-                    channels=1,
-                    dtype="float32",
-                )
-                stream.start()
 
                 async for response in ctx.receive():
                     if await self._emitter.should_interrupt():
@@ -772,8 +728,13 @@ class TTSSpeakProcessor(BaseDisplayProcessor):
                             except Exception:
                                 audio = None
 
-                    if event_type == "chunk" and audio and stream is not None:
-                        stream.write(audio)
+                    if event_type == "chunk" and audio:
+                        await self._audio_output.write(
+                            audio,
+                            sample_rate=self._cartesia_sample_rate,
+                            dtype="float32",
+                            channels=1,
+                        )
                         wrote_audio = True
                     if event_type == "done":
                         break
@@ -785,15 +746,7 @@ class TTSSpeakProcessor(BaseDisplayProcessor):
             logger.warning("TTS playback failed: %s", exc)
             return
         finally:
-            if stream is not None:
-                try:
-                    stream.stop()
-                except Exception:
-                    pass
-                try:
-                    stream.close()
-                except Exception:
-                    pass
+            await self._audio_output.close()
 
 
 class CartesiaMarkupProcessor(BaseDisplayProcessor):
