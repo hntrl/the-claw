@@ -102,7 +102,10 @@ class PipecatClawVoiceService:
         self._claw_controller = ClawController(
             ClawControllerConfig.from_env(success_rate=success_rate)
         )
-        self._runner = PipelineRunner()
+        # server.py owns process signals and coordinates websocket/stdin/mic
+        # teardown. Letting Pipecat also handle SIGINT can cancel only the
+        # pipeline while the outer server keeps waiting on its stop event.
+        self._runner = PipelineRunner(handle_sigint=False)
         self._runner_task: asyncio.Task[None] | None = None
 
         pipeline = Pipeline(
@@ -146,8 +149,12 @@ class PipecatClawVoiceService:
     async def stop(self) -> None:
         await self._task.cancel()
         if self._runner_task is not None:
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._runner_task
+            try:
+                await asyncio.wait_for(asyncio.shield(self._runner_task), timeout=3.0)
+            except TimeoutError:
+                self._runner_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, TimeoutError):
+                    await asyncio.wait_for(self._runner_task, timeout=2.0)
             self._runner_task = None
         await self._claw_controller.stop()
 

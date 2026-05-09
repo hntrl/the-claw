@@ -292,7 +292,10 @@ class RealtimeClawVoiceService:
         self._state_lock = asyncio.Lock()
         self._queue_lock = asyncio.Lock()
 
-        self._runner = PipelineRunner()
+        # server.py owns process signals and coordinates websocket/stdin/mic
+        # teardown. Letting Pipecat also handle SIGINT can cancel only the
+        # pipeline while the outer server keeps waiting on its stop event.
+        self._runner = PipelineRunner(handle_sigint=False)
         self._runner_task: asyncio.Task[None] | None = None
         self._task: PipelineTask | None = None
         self._llm: OpenAIRealtimeLLMService | None = None
@@ -398,8 +401,12 @@ class RealtimeClawVoiceService:
         if self._task is not None:
             await self._task.cancel()
         if self._runner_task is not None:
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._runner_task
+            try:
+                await asyncio.wait_for(asyncio.shield(self._runner_task), timeout=3.0)
+            except TimeoutError:
+                self._runner_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, TimeoutError):
+                    await asyncio.wait_for(self._runner_task, timeout=2.0)
             self._runner_task = None
 
         self._task = None
