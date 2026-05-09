@@ -144,6 +144,7 @@ Raw text over websocket (bypass STT):
 - `OPENAI_REALTIME_BARGE_IN_GRACE_MS` default `900`
 - `OPENAI_REALTIME_NOISE_REDUCTION` default `near_field` (`near_field` or `far_field`)
 - `OPENAI_REALTIME_SPEED` optional speaking rate for realtime voice output (recommended `1.1` to `1.4`)
+- `OPENAI_REALTIME_MIN_INPUT_AUDIO_MS` default `120`, minimum PCM depth batched before forwarding to Realtime
 - `AGENT_REALTIME_PLAY_AUDIO` default `1`
 - `AGENT_AUDIO_OUTPUT_DEVICE` optional (speaker device index or exact device name)
 - `AGENT_AUDIO_INPUT_DEVICE` optional (microphone device index or exact device name)

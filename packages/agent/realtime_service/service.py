@@ -284,6 +284,15 @@ class RealtimeClawVoiceService:
                 # Keep speed in a conservative range to avoid provider rejections.
                 self._voice_speed = max(0.5, min(2.0, parsed))
         self._input_sample_rate = max(24000, int(os.getenv("MIC_SAMPLE_RATE", "24000")))
+        min_input_audio_ms_raw = os.getenv("OPENAI_REALTIME_MIN_INPUT_AUDIO_MS", "120")
+        try:
+            self._min_input_audio_ms = max(20, int(min_input_audio_ms_raw))
+        except ValueError:
+            self._min_input_audio_ms = 120
+        self._min_input_audio_bytes = max(
+            2,
+            int(self._input_sample_rate * (self._min_input_audio_ms / 1000.0)) * 2,
+        )
 
         self._play_audio = os.getenv(
             "AGENT_REALTIME_PLAY_AUDIO", "1"
@@ -291,6 +300,7 @@ class RealtimeClawVoiceService:
 
         self._state_lock = asyncio.Lock()
         self._queue_lock = asyncio.Lock()
+        self._input_audio_lock = asyncio.Lock()
 
         # server.py owns process signals and coordinates websocket/stdin/mic
         # teardown. Letting Pipecat also handle SIGINT can cancel only the
@@ -320,6 +330,9 @@ class RealtimeClawVoiceService:
         self._audio_output = LocalAudioOutput()
         self._audio_error_logged = False
         self._audio_error_count = 0
+        self._pending_input_audio = bytearray()
+        self._realtime_recovery_task: asyncio.Task[None] | None = None
+        self._last_realtime_recovery_at = 0.0
 
         self._x_degrees_per_foot = _env_float("CLAW_X_DEGREES_PER_FOOT", 540.0)
         self._y_degrees_per_foot = _env_float("CLAW_Y_DEGREES_PER_FOOT", 540.0)
@@ -398,6 +411,11 @@ class RealtimeClawVoiceService:
         await self._queue_frame(LLMSetToolsFrame(tools=self._tools_schema))
 
     async def stop(self) -> None:
+        if self._realtime_recovery_task is not None:
+            self._realtime_recovery_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._realtime_recovery_task
+            self._realtime_recovery_task = None
         if self._task is not None:
             await self._task.cancel()
         if self._runner_task is not None:
@@ -413,6 +431,8 @@ class RealtimeClawVoiceService:
         self._llm = None
         self._user_aggregator = None
         self._assistant_aggregator = None
+        async with self._input_audio_lock:
+            self._pending_input_audio.clear()
         await self._audio_output.close()
         await self._claw_controller.stop()
 
@@ -428,14 +448,41 @@ class RealtimeClawVoiceService:
         del source
         if not audio_bytes:
             return
+        # Realtime uses 16-bit mono PCM. Drop malformed sub-sample fragments
+        # instead of letting them become 0ms/invalid input buffer writes.
+        if len(audio_bytes) < 2:
+            return
+        if len(audio_bytes) % 2:
+            audio_bytes = audio_bytes[:-1]
+            if not audio_bytes:
+                return
 
         decision = self._classify_live_audio_chunk(audio_bytes)
         self._record_input_gate_decision(decision)
         if decision.startswith("drop"):
+            async with self._input_audio_lock:
+                self._pending_input_audio.clear()
             return
         if decision == "forward_barge" and not await self._should_interrupt():
             await self.request_interrupt()
         await self._ensure_started()
+        frame_audio = await self._buffer_live_audio_chunk(audio_bytes)
+        if frame_audio is None:
+            return
+        await self._queue_input_audio_frame(frame_audio)
+
+    async def _buffer_live_audio_chunk(self, audio_bytes: bytes) -> bytes | None:
+        async with self._input_audio_lock:
+            self._pending_input_audio.extend(audio_bytes)
+            if len(self._pending_input_audio) < self._min_input_audio_bytes:
+                return None
+            frame_audio = bytes(self._pending_input_audio)
+            self._pending_input_audio.clear()
+            return frame_audio
+
+    async def _queue_input_audio_frame(self, audio_bytes: bytes) -> None:
+        if len(audio_bytes) < self._min_input_audio_bytes:
+            return
         await self._queue_frame(
             InputAudioRawFrame(
                 audio=audio_bytes,
@@ -678,13 +725,9 @@ class RealtimeClawVoiceService:
 
     async def _on_error(self, frame: ErrorFrame) -> None:
         message = str(frame.error)
-        if (
-            "no active response found" in message.lower()
-            or "already shorter than" in message.lower()
-            or "input_audio_buffer_commit_empty" in message.lower()
-            or "buffer too small" in message.lower()
-        ):
+        if self._is_recoverable_realtime_audio_error(message):
             logger.debug("Ignoring realtime cancellation race: %s", message)
+            await self._schedule_realtime_recovery(message)
             return
 
         logger.warning("Realtime pipeline error: %s", frame.error)
@@ -696,6 +739,45 @@ class RealtimeClawVoiceService:
         await self._emit({"type": "state", "state": "attract"})
         await self._clear_interrupt()
         await self._set_executing(False)
+
+    def _is_recoverable_realtime_audio_error(self, message: str) -> bool:
+        normalized = message.lower()
+        return (
+            "no active response found" in normalized
+            or "already shorter than" in normalized
+            or "input_audio_buffer_commit_empty" in normalized
+            or "buffer too small" in normalized
+            or "audio buffer" in normalized
+        )
+
+    async def _schedule_realtime_recovery(self, reason: str) -> None:
+        if self._realtime_recovery_task is not None and not self._realtime_recovery_task.done():
+            return
+        self._realtime_recovery_task = asyncio.create_task(
+            self._recover_realtime_session(reason)
+        )
+
+    async def _recover_realtime_session(self, reason: str) -> None:
+        now = time.monotonic()
+        if now - self._last_realtime_recovery_at < 1.0:
+            return
+        self._last_realtime_recovery_at = now
+
+        async with self._input_audio_lock:
+            self._pending_input_audio.clear()
+
+        llm = self._llm
+        if llm is None:
+            return
+
+        logger.warning("Resetting realtime session after audio-buffer error: %s", reason)
+        await self._emit({"type": "state", "state": "listening"})
+        try:
+            await llm.reset_conversation()
+            await self._queue_frame(LLMSetToolsFrame(tools=self._tools_schema))
+        except Exception as exc:
+            logger.warning("Realtime session reset failed: %s", exc)
+            await self._emit({"type": "state", "state": "error"})
 
     def _build_tools_schema(self) -> ToolsSchema:
         move_axis = FunctionSchema(
