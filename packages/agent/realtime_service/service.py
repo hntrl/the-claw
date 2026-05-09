@@ -110,7 +110,7 @@ EMOTION_MAP: dict[str, str] = {
 
 SYSTEM_PROMPT_TEMPLATE = """You are ClawPilot, a voice agent for a DIY claw machine.
 
-Personality: playfully sassy, theatrical, brief (1-2 sentences).
+Personality: playfully sassy, theatrical, brief, but not overwhelmingly slow (1-2 sentences).
 
 Machine basics:
 - Three axes: X (forward/back), Y (left/right), Z (up/down cable).
@@ -751,7 +751,10 @@ class RealtimeClawVoiceService:
         )
 
     async def _schedule_realtime_recovery(self, reason: str) -> None:
-        if self._realtime_recovery_task is not None and not self._realtime_recovery_task.done():
+        if (
+            self._realtime_recovery_task is not None
+            and not self._realtime_recovery_task.done()
+        ):
             return
         self._realtime_recovery_task = asyncio.create_task(
             self._recover_realtime_session(reason)
@@ -770,7 +773,9 @@ class RealtimeClawVoiceService:
         if llm is None:
             return
 
-        logger.warning("Resetting realtime session after audio-buffer error: %s", reason)
+        logger.warning(
+            "Resetting realtime session after audio-buffer error: %s", reason
+        )
         await self._emit({"type": "state", "state": "listening"})
         try:
             await llm.reset_conversation()
@@ -795,7 +800,7 @@ class RealtimeClawVoiceService:
         open_claw = FunctionSchema(
             name="open_claw",
             description="Open claw servo. Optional angle 25-90.",
-            properties={"angle": {"type": "integer", "minimum": 25, "maximum": 90}},
+            properties={},
             required=[],
         )
         lower_claw = FunctionSchema(
@@ -815,7 +820,7 @@ class RealtimeClawVoiceService:
         close_claw = FunctionSchema(
             name="close_claw",
             description="Close claw servo. Optional angle 25-90.",
-            properties={"angle": {"type": "integer", "minimum": 25, "maximum": 90}},
+            properties={},
             required=[],
         )
         home_z = FunctionSchema(
@@ -968,37 +973,27 @@ class RealtimeClawVoiceService:
 
     async def _handle_move_axis(self, params: FunctionCallParams) -> None:
         args = dict(params.arguments) if isinstance(params.arguments, Mapping) else {}
-        result = await self._tool_move_axis(
-            args, turn_state=self._ensure_turn_state()
-        )
+        result = await self._tool_move_axis(args, turn_state=self._ensure_turn_state())
         await params.result_callback(result)
 
     async def _handle_open_claw(self, params: FunctionCallParams) -> None:
         args = dict(params.arguments) if isinstance(params.arguments, Mapping) else {}
-        result = await self._tool_open_claw(
-            args, turn_state=self._ensure_turn_state()
-        )
+        result = await self._tool_open_claw(args, turn_state=self._ensure_turn_state())
         await params.result_callback(result)
 
     async def _handle_lower_claw(self, params: FunctionCallParams) -> None:
         args = dict(params.arguments) if isinstance(params.arguments, Mapping) else {}
-        result = await self._tool_lower_claw(
-            args, turn_state=self._ensure_turn_state()
-        )
+        result = await self._tool_lower_claw(args, turn_state=self._ensure_turn_state())
         await params.result_callback(result)
 
     async def _handle_raise_claw(self, params: FunctionCallParams) -> None:
         args = dict(params.arguments) if isinstance(params.arguments, Mapping) else {}
-        result = await self._tool_raise_claw(
-            args, turn_state=self._ensure_turn_state()
-        )
+        result = await self._tool_raise_claw(args, turn_state=self._ensure_turn_state())
         await params.result_callback(result)
 
     async def _handle_close_claw(self, params: FunctionCallParams) -> None:
         args = dict(params.arguments) if isinstance(params.arguments, Mapping) else {}
-        result = await self._tool_close_claw(
-            args, turn_state=self._ensure_turn_state()
-        )
+        result = await self._tool_close_claw(args, turn_state=self._ensure_turn_state())
         await params.result_callback(result)
 
     async def _handle_home_z(self, params: FunctionCallParams) -> None:
@@ -1048,8 +1043,7 @@ class RealtimeClawVoiceService:
         self, arguments: dict[str, Any], *, turn_state: dict[str, Any]
     ) -> dict[str, Any]:
         await self._begin_command_tool(turn_state)
-        angle = self._coerce_int_or_none(arguments.get("angle"))
-        result = await self._claw_controller.open_claw(angle=angle)
+        result = await self._claw_controller.open_claw(angle=90)
         await self._finish_command_tool(result)
         return result
 
@@ -1082,8 +1076,7 @@ class RealtimeClawVoiceService:
         self, arguments: dict[str, Any], *, turn_state: dict[str, Any]
     ) -> dict[str, Any]:
         await self._begin_command_tool(turn_state)
-        angle = self._coerce_int_or_none(arguments.get("angle"))
-        result = await self._claw_controller.close_claw(angle=angle)
+        result = await self._claw_controller.close_claw(angle=25)
         await self._finish_command_tool(result)
         return result
 
@@ -1202,7 +1195,9 @@ class RealtimeClawVoiceService:
         z_value = state.get("z")
         z_homed = bool(state.get("z_homed"))
         z_homed_str = "YES" if z_homed else "NO (Z position is a guess until homed)"
-        status_banner = f"[machine status: fsm={fsm}, Z={z_value}, Z_homed={z_homed_str}]"
+        status_banner = (
+            f"[machine status: fsm={fsm}, Z={z_value}, Z_homed={z_homed_str}]"
+        )
         return f"{status_banner}\n{user_text}"
 
     def _coerce_float(self, value: Any, default: float) -> float:

@@ -197,7 +197,7 @@ const float Z_REFERENCE_DOWN_DEGREES = 1080.0;  // informational, ~3 feet
 const int   Z_DOWN_SIGN = +1;            // flip to -1 if lowering goes up
 
 // Steps per revolution (200 steps/rev * 16 microsteps)
-const float STEPS_PER_REVOLUTION = 620.0;  //was 3200 before
+const float STEPS_PER_REVOLUTION = 700.0;  //was 3200 before
 const float STEPS_PER_DEGREE = STEPS_PER_REVOLUTION / 360.0;
 
 // Top of travel — hard bound. Always 0 in agent frame.
@@ -211,7 +211,7 @@ const long Z_MAX_STEPS = (long)(Z_MAX_DOWN_DEGREES * STEPS_PER_DEGREE);
 const long Z_REFERENCE_DOWN_STEPS = (long)(Z_REFERENCE_DOWN_DEGREES * STEPS_PER_DEGREE);
 
 // Backup amounts (after hitting limit switches during normal X motion)
-const float X_BACKUP_DEGREES = 25.0;
+const float X_BACKUP_DEGREES = 15.0;
 const long  X_BACKUP_STEPS = (long)(X_BACKUP_DEGREES * STEPS_PER_DEGREE);
 
 // Y backup amount when a Y limit switch fires (matches X behavior).
@@ -258,11 +258,11 @@ const long  Y_BACKUP_STEPS = (long)(Y_BACKUP_DEGREES * STEPS_PER_DEGREE);
 // │                                                                    │
 // └────────────────────────────────────────────────────────────────────┘
 const int HOME_X_DIRECTION = -1;
-const int HOME_Y_DIRECTION = +1;
+const int HOME_Y_DIRECTION = -1;
 
 const float HOME_DEGREES = 200.0 * 360.0;  // Large travel to guarantee hitting limit
 const long  HOME_STEPS = (long)(HOME_DEGREES * STEPS_PER_DEGREE);
-const float HOME_BACKOFF_TURNS = 1.0;      // Back off 1 revolution after X/A alignment
+const float HOME_BACKOFF_TURNS = 0.1;      // Back off 1 revolution after X/A alignment
 const long  HOME_BACKOFF_STEPS = (long)(HOME_BACKOFF_TURNS * STEPS_PER_REVOLUTION);
 const float HOME_Y_BACKOFF_TURNS = 0.25;   // Y back-off after hitting limit (quarter turn)
 const long  HOME_Y_BACKOFF_STEPS = (long)(HOME_Y_BACKOFF_TURNS * STEPS_PER_REVOLUTION);
