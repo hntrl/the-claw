@@ -38,10 +38,14 @@
 //                      Hard bottom bound Z <= Z_MAX_DOWN_DEGREES (clamped,
 //                      EVT Z_CLAMPED).
 //                      Top bound is HARDWARE: the Z_TOP_LIMIT switch
-//                      (Arduino A0) auto-stops upward motion and resyncs
-//                      Z=0 in the agent frame. No software top clamp.
+//                      (Arduino A0) auto-stops upward motion. On hit, Z is
+//                      resynced to 0 at the switch trigger point and the
+//                      claw backs off by Z_BACKUP_DEGREES so it isn't
+//                      resting on the switch.
 //   ZHOME              Drive Z upward until Z_TOP_LIMIT fires; resync
-//                      Z=0 and set zPositionKnown=true. Times out with
+//                      Z=0 at the switch, then back off by
+//                      Z_HOME_BACKOFF_DEGREES so the claw parks clear of
+//                      the (delicate) limit switch. Times out with
 //                      DONE ZHOME STUCK after HOME_PHASE_TIMEOUT_MS.
 //   RAISE              Equivalent to ZHOME — drives up until the top
 //                      limit fires. Kept as a separate name for backward
@@ -49,8 +53,9 @@
 //   OPEN [angle]       Set servo to open (default SERVO_OPEN_ANGLE).
 //   CLOSE [angle]      Set servo to closed (default SERVO_CLOSED_ANGLE).
 //   S <angle>          Set servo to absolute angle (clamped to physical limits).
-//   HOME               Run full homing sequence: Z up to limit (resync),
-//                      then X+A homing, then Y homing, then claw open.
+//   HOME               Run full homing sequence: Z up to limit (resync +
+//                      backoff), then X+A homing, then Y homing, then
+//                      claw open.
 //   HALT               Immediately stop all motion. Abort any in-progress command.
 //   STATE?             Emit one-line state report.
 //   PING               Emit PONG.
@@ -124,6 +129,10 @@
 // causes step-skipping. With a hardware top limit, the loss of step
 // fidelity is irrelevant: the switch defines Z=0 and the firmware
 // resyncs to it on every retract that reaches the top.
+//
+// The Z top switch is also delicate, so after every hit we drop the claw
+// a small amount (Z_BACKUP_DEGREES on plain Z moves, Z_HOME_BACKOFF_DEGREES
+// on homing paths) so it isn't resting against / torquing the switch.
 #define Z_TOP_LIMIT A0
 
 // Servo pin — A3 is clean: no CNC Shield conflicts, Servo lib uses Timer1
@@ -145,11 +154,16 @@
 // │  pressed. The switch is the source of truth, not step counting. Any   │
 // │  upward Z move that fires the switch resyncs zPositionSteps = 0,      │
 // │  correcting any cumulative step-skip drift from cable-spool tension   │
-// │  shocks or other transient missed steps.                              │
+// │  shocks or other transient missed steps. After resync, the claw       │
+// │  backs off a small amount so it isn't pressing against the switch.    │
 // │                                                                       │
 // │  Z position is tracked in motor degrees from the switch-defined Z=0:  │
-// │    Z = 0    -> claw at the top limit                                  │
+// │    Z = 0    -> claw at the top limit (the switch trigger point)       │
 // │    Z > 0    -> claw lower (descended by this many degrees)            │
+// │                                                                       │
+// │  After any homing path (HOME / ZHOME / RAISE), the claw rests at      │
+// │  Z = Z_HOME_BACKOFF_DEGREES, NOT at Z = 0. The switch trigger point   │
+// │  is the canonical zero and Z values are referenced to it.             │
 // │                                                                       │
 // │  POSITION-KNOWN FLAG:                                                 │
 // │                                                                       │
@@ -162,7 +176,8 @@
 // │  Z BOUNDS:                                                            │
 // │                                                                       │
 // │  TOP: HARDWARE switch only. No software top clamp. The switch fires   │
-// │     during upward motion, motor hard-stops, Z resyncs to 0.           │
+// │     during upward motion, motor hard-stops, Z resyncs to 0, and the   │
+// │     claw drops by the relevant backoff amount.                        │
 // │                                                                       │
 // │  HARD MAX (Z_MAX_DOWN_DEGREES): HARD safety bound on descent.         │
 // │     Set this to JUST UNDER the cable length so the spool can't fully  │
@@ -218,9 +233,17 @@ const long  X_BACKUP_STEPS = (long)(X_BACKUP_DEGREES * STEPS_PER_DEGREE);
 const float Y_BACKUP_DEGREES = 25.0;
 const long  Y_BACKUP_STEPS = (long)(Y_BACKUP_DEGREES * STEPS_PER_DEGREE);
 
-// (Z has no limit switch in this build; Z_BACKUP_* constants from older
-// builds have been removed. Z safety is provided by software bounds in
-// clampZTarget at the dispatch layer.)
+// Z backup amount when the top limit switch fires during a plain Z move.
+// Modest — gets the claw clear of the switch but doesn't waste much travel.
+const float Z_BACKUP_DEGREES = 25.0;
+const long  Z_BACKUP_STEPS = (long)(Z_BACKUP_DEGREES * STEPS_PER_DEGREE);
+
+// Small post-home backoff to keep the claw from resting against the
+// (delicate) Z top limit switch after homing. The Z=0 reference is still
+// the switch trigger point itself; after homing the claw simply parks at
+// Z = Z_HOME_BACKOFF_DEGREES. Keep this small.
+const float Z_HOME_BACKOFF_DEGREES = 10.0;
+const long  Z_HOME_BACKOFF_STEPS = (long)(Z_HOME_BACKOFF_DEGREES * STEPS_PER_DEGREE);
 
 // Homing / alignment configuration
 //
@@ -323,7 +346,9 @@ enum State {
   MOVING_Y,
   BACKING_OFF_Y,
   MOVING_Z,
-  HOMING_Z_TO_LIMIT,     // Drive Z up until Z_TOP_LIMIT fires; resync Z=0
+  BACKING_OFF_Z,         // Z plain-move limit-hit backoff
+  HOMING_Z_TO_LIMIT,
+  HOMING_Z_BACKOFF,      // post-home Z backoff (HOME / ZHOME / RAISE)
   HOMING_TO_LIMIT,
   HOMING_WAIT,
   HOMING_BACKOFF,
@@ -700,7 +725,9 @@ void loop() {
     case MOVING_Y:          runYAxis();           break;
     case BACKING_OFF_Y:     runYBackoff();        break;
     case MOVING_Z:          runZAxis();           break;
+    case BACKING_OFF_Z:     runZBackoff();        break;
     case HOMING_Z_TO_LIMIT: runHomingZToLimit();  break;
+    case HOMING_Z_BACKOFF:  runHomingZBackoff();  break;
     case HOMING_TO_LIMIT:   runHomingToLimit();   break;
     case HOMING_WAIT:       runHomingWait();      break;
     case HOMING_BACKOFF:    runHomingBackoff();   break;
@@ -830,9 +857,11 @@ void dispatchLine(char* line) {
   }
 
   // ZHOME / RAISE: drive Z upward until the top limit switch fires. On hit
-  // we resync zPositionSteps = 0 and set zPositionKnown = true. The two
-  // command names are aliases — ZHOME is the explicit name, RAISE is kept
-  // for readability ("raise the claw to the top") and backwards compat.
+  // we resync zPositionSteps = 0, set zPositionKnown = true, then back off
+  // by Z_HOME_BACKOFF_DEGREES so the claw isn't pressed against the
+  // (delicate) switch. The two command names are aliases — ZHOME is the
+  // explicit name, RAISE is kept for readability ("raise the claw to the
+  // top") and backwards compat.
   if (strcmp(kw, "ZHOME") == 0 || strcmp(kw, "RAISE") == 0) {
     activeCmdLetter = 'R';
     enableMotors();
@@ -840,7 +869,7 @@ void dispatchLine(char* line) {
     // Reset the top-limit debounce. If the switch is already pressed at
     // the start of this command, the per-tick check in runHomingZToLimit
     // will catch it within LIMIT_DEBOUNCE_READS ticks and resync without
-    // any actual motion.
+    // any actual motion (then back off the small amount).
     zTopLimitDebounce = 0;
     zMoveDirection = -1;  // upward
     // Drive a large negative-agent (= -Z_DOWN_SIGN motor) move; we expect
@@ -855,8 +884,8 @@ void dispatchLine(char* line) {
   if (strcmp(kw, "HOME") == 0) {
     // Full homing sequence — Z first (so the claw is retracted and won't
     // swing into anything during X/Y motion), then X+A, then Y, then claw
-    // open. On completion, Z is resynced and the gantry is parked at the
-    // front-left dropoff corner.
+    // open. On completion, Z is resynced (and backed off slightly) and the
+    // gantry is parked at the front-left dropoff corner.
     activeCmdLetter = 'H';
     emitAck("HOME");
     enableMotors();
@@ -868,8 +897,9 @@ void dispatchLine(char* line) {
     yLimitDebounce = 0;
     zTopLimitDebounce = 0;
     // Phase 0: drive Z up. After it hits, runHomingZToLimit transitions
-    // into HOMING_TO_LIMIT for the X+A phase. activeCmdLetter stays 'H'
-    // so the eventual emitDone uses "HOME".
+    // into HOMING_Z_BACKOFF for the small post-home backoff, and from
+    // there into HOMING_TO_LIMIT for the X+A phase. activeCmdLetter
+    // stays 'H' so the eventual emitDone uses "HOME".
     zMoveDirection = -1;
     long upDistance = (long)(360.0 * 200.0 * STEPS_PER_DEGREE);
     stepperZ.move(-Z_DOWN_SIGN * upDistance);
@@ -952,9 +982,9 @@ void dispatchLine(char* line) {
     } else if (kw[0] == 'Z') {
       // Z move: positive degrees = down. Software clamps target to
       // [0, Z_MAX_STEPS]. The HARDWARE top limit switch will also stop
-      // upward motion (resyncing Z=0) before we ever hit the software
-      // top bound — the software clamp is a backstop in case the switch
-      // fails or isn't yet wired.
+      // upward motion (resyncing Z=0 and backing off) before we ever
+      // hit the software top bound — the software clamp is a backstop
+      // in case the switch fails or isn't yet wired.
       long requested_target = zPositionSteps + steps;
       long clamped_target = clampZTarget(requested_target);
       long delta_agent = clamped_target - zPositionSteps;
@@ -1015,7 +1045,10 @@ void serviceHalt() {
     // would still hold the pre-move value (or the not-yet-reached target),
     // and subsequent Z bounds checks would be off by however far the motor
     // got before the halt.
-    if (currentState == MOVING_Z || currentState == HOMING_Z_TO_LIMIT) {
+    if (currentState == MOVING_Z ||
+        currentState == BACKING_OFF_Z ||
+        currentState == HOMING_Z_TO_LIMIT ||
+        currentState == HOMING_Z_BACKOFF) {
       zPositionSteps = currentZAgentPosition();
       zPendingTarget = zPositionSteps;
       Serial.print(F("EVT Z_RESYNC reason=halt z_pos="));
@@ -1076,7 +1109,9 @@ void emitStateLine(const String& id) {
     case MOVING_Y:          stateName = "MOVING_Y"; break;
     case BACKING_OFF_Y:     stateName = "BACKING_OFF_Y"; break;
     case MOVING_Z:          stateName = "MOVING_Z"; break;
+    case BACKING_OFF_Z:     stateName = "BACKING_OFF_Z"; break;
     case HOMING_Z_TO_LIMIT: stateName = "HOMING_Z_TO_LIMIT"; break;
+    case HOMING_Z_BACKOFF:  stateName = "HOMING_Z_BACKOFF"; break;
     case HOMING_TO_LIMIT:   stateName = "HOMING_TO_LIMIT"; break;
     case HOMING_WAIT:       stateName = "HOMING_WAIT"; break;
     case HOMING_BACKOFF:    stateName = "HOMING_BACKOFF"; break;
@@ -1233,8 +1268,10 @@ void runYBackoff() {
 //      hit the top while moving away from it).
 //   2. Upward (zMoveDirection == -1): poll the top limit switch every tick.
 //      On confirmed hit, hard-stop, resync zPositionSteps = 0, mark
-//      zPositionKnown = true. This is the auto-correction for any cumulative
-//      step-skipping caused by cable spool tension shocks.
+//      zPositionKnown = true, and back off by Z_BACKUP_STEPS so the claw
+//      isn't resting on the (delicate) switch. This is also the
+//      auto-correction for any cumulative step-skipping caused by cable
+//      spool tension shocks.
 
 void runZAxis() {
   // Poll the top limit switch only on upward motion.
@@ -1248,12 +1285,17 @@ void runZAxis() {
       zPendingTarget = 0;
       zPositionKnown = true;
       Serial.println(F("EVT Z_TOP_HIT resync_zero=1"));
-      emitDone("Z", "LIMIT");
-      lastMovementTime = millis();
-      currentState = IDLE;
-      activeCmdLetter = '?';
-      activeCmdId = "-";
-      zMoveDirection = 0;
+
+      // Back off downward by Z_BACKUP_STEPS so the claw isn't pressed
+      // against the switch. zPendingTarget is updated so runZBackoff()
+      // can sync zPositionSteps to it on completion.
+      zTopLimitDebounce = 0;
+      zMoveDirection = +1;  // backoff is downward
+      zPendingTarget = Z_BACKUP_STEPS;
+      stepperZ.move(Z_DOWN_SIGN * Z_BACKUP_STEPS);
+      Serial.print(F("EVT BACKUP axis=Z steps="));
+      Serial.println(Z_BACKUP_STEPS);
+      currentState = BACKING_OFF_Z;
       return;
     }
   }
@@ -1272,6 +1314,24 @@ void runZAxis() {
   }
 }
 
+// Backoff after the Z top limit fires during a plain Z command. Drives the
+// claw downward by Z_BACKUP_STEPS off the switch, then completes with
+// LIMIT status (so the agent knows the destination wasn't reached because
+// the limit intervened).
+void runZBackoff() {
+  if (stepperZ.distanceToGo() != 0) {
+    stepperZ.run();
+    return;
+  }
+  zPositionSteps = zPendingTarget;
+  emitDone("Z", "LIMIT");
+  lastMovementTime = millis();
+  currentState = IDLE;
+  activeCmdLetter = '?';
+  activeCmdId = "-";
+  zMoveDirection = 0;
+}
+
 // === HOMING / ALIGNMENT SEQUENCE ===
 //
 // Multi-phase sequence kicked off by the HOME command:
@@ -1282,6 +1342,12 @@ void runZAxis() {
 //     means the claw is retracted and won't swing into anything as the
 //     gantry moves around. If Z never hits within HOME_PHASE_TIMEOUT_MS
 //     the entire HOME aborts with STUCK.
+//
+//   Phase 0.5 — runHomingZBackoff:
+//     Drops the claw by Z_HOME_BACKOFF_STEPS so it isn't pressed against
+//     the (delicate) top limit switch during the rest of homing or after
+//     the sequence completes. The Z=0 reference is still the switch
+//     trigger point itself; the claw simply parks slightly below it.
 //
 //   Phase 1 — runHomingToLimit:
 //     Both X and A drive in the +X direction toward their limit switches.
@@ -1314,9 +1380,7 @@ void runZAxis() {
 // Drive Z upward until the top limit switch fires (debounced). On hit:
 //   - Resync zPositionSteps = 0 / zMotorOrigin = current motor pos
 //   - Set zPositionKnown = true
-//   - If this is part of full HOME (activeCmdLetter == 'H'), transition
-//     into the X+A homing phase. Otherwise (standalone ZHOME / RAISE,
-//     letter 'R'), complete the command and return to IDLE.
+//   - Transition into HOMING_Z_BACKOFF for the small post-home dropoff
 // Phase-level timeout aborts the command with STUCK if the switch never
 // fires within HOME_PHASE_TIMEOUT_MS.
 void runHomingZToLimit() {
@@ -1332,29 +1396,54 @@ void runHomingZToLimit() {
     zPendingTarget = 0;
     zPositionKnown = true;
     Serial.println(F("EVT Z_TOP_HIT resync_zero=1"));
-    zMoveDirection = 0;
 
-    if (activeCmdLetter == 'H') {
-      // Continue into X+A phase.
-      Serial.println(F("EVT HOME_X_DRIVING"));
-      long xHomeMove = (long)HOME_X_DIRECTION * HOME_STEPS;
-      stepperX.move(xHomeMove);
-      stepperA.move(xHomeMove);
-      homePhaseStart = millis();
-      currentState = HOMING_TO_LIMIT;
-      return;
-    }
-
-    // Standalone ZHOME / RAISE — done.
-    emitDone("ZHOME", "OK");
-    lastMovementTime = millis();
-    currentState = IDLE;
-    activeCmdLetter = '?';
-    activeCmdId = "-";
+    // Issue the small post-home backoff so the claw doesn't rest on the
+    // delicate switch. zPendingTarget tracks where we'll be parked in
+    // agent-frame steps when the backoff completes.
+    zTopLimitDebounce = 0;
+    zMoveDirection = +1;  // downward
+    zPendingTarget = Z_HOME_BACKOFF_STEPS;
+    stepperZ.move(Z_DOWN_SIGN * Z_HOME_BACKOFF_STEPS);
+    Serial.print(F("EVT HOME_Z_BACKING_OFF steps="));
+    Serial.println(Z_HOME_BACKOFF_STEPS);
+    currentState = HOMING_Z_BACKOFF;
     return;
   }
 
   stepperZ.run();
+}
+
+// Phase 0.5: small dropoff after the Z top limit hit, applied to all
+// homing paths (HOME, ZHOME, RAISE). On completion, dispatches to either
+// the X+A homing phase (full HOME) or completes the standalone command.
+void runHomingZBackoff() {
+  if (stepperZ.distanceToGo() != 0) {
+    stepperZ.run();
+    return;
+  }
+
+  // Backoff complete. zPositionSteps now reflects the parked position
+  // (Z_HOME_BACKOFF_STEPS below the switch in agent frame).
+  zPositionSteps = zPendingTarget;
+  zMoveDirection = 0;
+
+  if (activeCmdLetter == 'H') {
+    // Continue full HOME sequence into X+A phase.
+    Serial.println(F("EVT HOME_X_DRIVING"));
+    long xHomeMove = (long)HOME_X_DIRECTION * HOME_STEPS;
+    stepperX.move(xHomeMove);
+    stepperA.move(xHomeMove);
+    homePhaseStart = millis();
+    currentState = HOMING_TO_LIMIT;
+    return;
+  }
+
+  // Standalone ZHOME / RAISE — done.
+  emitDone("ZHOME", "OK");
+  lastMovementTime = millis();
+  currentState = IDLE;
+  activeCmdLetter = '?';
+  activeCmdId = "-";
 }
 
 void runHomingToLimit() {
