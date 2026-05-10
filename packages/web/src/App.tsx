@@ -26,18 +26,41 @@ function App() {
   const { sendRawText, sendAudioChunk } = useDisplaySocket();
   const mic = useClientMicStream(sendAudioChunk);
   const keyboardOverlay = useKeyboardTextInput(sendRawText);
+  const micButtonClass = !mic.supported
+    ? ""
+    : mic.mode === "on" || mic.pttActive
+      ? "is-live"
+      : mic.mode === "ptt"
+        ? "is-ptt"
+        : "is-muted";
+  const micLabel = !mic.supported
+    ? "MIC N/A"
+    : mic.mode === "off"
+      ? "MIC OFF"
+      : mic.mode === "on"
+        ? "MIC ON"
+        : mic.pttActive
+          ? "PTT LIVE"
+          : "PTT (HOLD R-OPT)";
+  const micAriaLabel = !mic.supported
+    ? "Microphone unavailable"
+    : mic.mode === "off"
+      ? "Microphone off"
+      : mic.mode === "on"
+        ? "Microphone always on"
+        : "Push to talk mode. Hold right Option key to transmit";
 
   return (
     <>
       <AgentScreen mood={moodOverride} keyboardOverlay={keyboardOverlay} />
       <button
-        aria-label={mic.muted ? "Unmute microphone" : "Mute microphone"}
-        className={`mic-toggle ${mic.muted ? "is-muted" : "is-live"}`}
+        aria-label={micAriaLabel}
+        className={`mic-toggle ${micButtonClass}`}
         disabled={!mic.supported}
-        onClick={mic.toggleMuted}
+        onClick={mic.cycleMode}
         type="button"
       >
-        {mic.supported ? (mic.muted ? "MIC OFF" : "MIC ON") : "MIC N/A"}
+        {micLabel}
       </button>
       {mic.error ? <p className="mic-error">{mic.error}</p> : null}
       <DebugFieldPanel />

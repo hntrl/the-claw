@@ -583,6 +583,12 @@ body {
   border-color: rgba(199, 255, 255, 0.9);
 }
 
+.mic-toggle.is-ptt {
+  color: rgba(0, 0, 0, 0.9);
+  background: rgba(255, 240, 138, 0.92);
+  border-color: rgba(255, 248, 195, 0.92);
+}
+
 .mic-toggle:disabled {
   opacity: 0.45;
   cursor: not-allowed;

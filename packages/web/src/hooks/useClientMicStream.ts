@@ -3,11 +3,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const TARGET_SAMPLE_RATE = 24_000;
 const PROCESSOR_BUFFER_SIZE = 2_048;
 
+export type MicMode = "off" | "on" | "ptt";
+
 type ClientMicControls = {
+  mode: MicMode;
   muted: boolean;
+  pttActive: boolean;
   supported: boolean;
   error?: string;
-  toggleMuted: () => void;
+  cycleMode: () => void;
 };
 
 const resample = (
@@ -52,7 +56,8 @@ const float32ToPcm16 = (input: Float32Array): Uint8Array => {
 export const useClientMicStream = (
   sendAudioChunk: (chunk: Uint8Array) => boolean,
 ): ClientMicControls => {
-  const [muted, setMuted] = useState(true);
+  const [mode, setMode] = useState<MicMode>("off");
+  const [pttHeld, setPttHeld] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const [supported] = useState(
     typeof window !== "undefined" &&
@@ -65,6 +70,16 @@ export const useClientMicStream = (
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const sinkRef = useRef<GainNode | null>(null);
+  const modeRef = useRef<MicMode>(mode);
+  const pttHeldRef = useRef<boolean>(pttHeld);
+
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+
+  useEffect(() => {
+    pttHeldRef.current = pttHeld;
+  }, [pttHeld]);
 
   const stopCapture = useCallback(async () => {
     processorRef.current?.disconnect();
@@ -136,6 +151,13 @@ export const useClientMicStream = (
       sink.gain.value = 0;
 
       processor.onaudioprocess = (event) => {
+        const isTransmitting =
+          modeRef.current === "on" ||
+          (modeRef.current === "ptt" && pttHeldRef.current);
+        if (!isTransmitting) {
+          return;
+        }
+
         const input = event.inputBuffer.getChannelData(0);
         if (!input.length) {
           return;
@@ -171,7 +193,7 @@ export const useClientMicStream = (
   }, [sendAudioChunk, stopCapture, supported]);
 
   useEffect(() => {
-    if (muted) {
+    if (mode === "off") {
       void stopCapture();
       return;
     }
@@ -187,7 +209,57 @@ export const useClientMicStream = (
     return () => {
       cancelled = true;
     };
-  }, [muted, startCapture, stopCapture]);
+  }, [mode, startCapture, stopCapture]);
+
+  useEffect(() => {
+    if (mode === "ptt" || !supported) {
+      return;
+    }
+    setPttHeld(false);
+  }, [mode, supported]);
+
+  useEffect(() => {
+    if (!supported) {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== "AltRight" || modeRef.current !== "ptt") {
+        return;
+      }
+      event.preventDefault();
+      setPttHeld(true);
+    };
+
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.code !== "AltRight") {
+        return;
+      }
+      setPttHeld(false);
+    };
+
+    const clearHeld = () => {
+      setPttHeld(false);
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== "visible") {
+        setPttHeld(false);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", clearHeld);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", clearHeld);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [supported]);
 
   useEffect(() => {
     return () => {
@@ -195,17 +267,29 @@ export const useClientMicStream = (
     };
   }, [stopCapture]);
 
-  const toggleMuted = useCallback(() => {
+  const cycleMode = useCallback(() => {
     if (!supported) {
       return;
     }
-    setMuted((current) => !current);
+    setMode((current) => {
+      if (current === "off") {
+        return "on";
+      }
+      if (current === "on") {
+        return "ptt";
+      }
+      return "off";
+    });
   }, [supported]);
 
+  const pttActive = mode === "ptt" && pttHeld;
+
   return {
-    muted,
+    mode,
+    muted: mode === "off",
+    pttActive,
     supported,
     error,
-    toggleMuted,
+    cycleMode,
   };
 };
