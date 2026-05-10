@@ -142,7 +142,8 @@ Rules:
 - If a tool returns status LIMIT, mention it briefly.
 - If a tool returns status STUCK, say a motor appears stuck and stop chaining moves.
 - If state shows z_homed is false and user asks for lower/grab/deliver behavior, suggest home_z() first.
-- If a tool call is running, do not narrate "checking status" filler; wait for tool results first.
+- Motion/action tools may be accepted asynchronously; do not invent completion details.
+- If confirmation is needed after motion, call get_state().
 - Never mention internal runtime mechanics like queues, queue depth, pending jobs, function calls, tools, or status polling.
 - Speak only user-facing claw actions/results (for example: moving, grabbing, stopping), never implementation details.
 - For non-action questions, answer briefly without motion tools.
@@ -306,6 +307,8 @@ class RealtimeClawVoiceService:
         self._input_audio_lock = asyncio.Lock()
         self._tool_call_lock = asyncio.Lock()
         self._queued_tool_calls = 0
+        self._inflight_tool_calls = 0
+        self._background_tool_tasks: set[asyncio.Task[None]] = set()
 
         # server.py owns process signals and coordinates websocket/stdin/mic
         # teardown. Letting Pipecat also handle SIGINT can cancel only the
@@ -421,6 +424,12 @@ class RealtimeClawVoiceService:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._realtime_recovery_task
             self._realtime_recovery_task = None
+        if self._background_tool_tasks:
+            for task in tuple(self._background_tool_tasks):
+                task.cancel()
+            with contextlib.suppress(Exception):
+                await asyncio.gather(*self._background_tool_tasks, return_exceptions=True)
+            self._background_tool_tasks.clear()
         if self._task is not None:
             await self._task.cancel()
         if self._runner_task is not None:
@@ -721,12 +730,14 @@ class RealtimeClawVoiceService:
         if turn_state["thinking_started"] and not turn_state["intent_complete"]:
             await self._mark_intent_complete(turn_state, emit_effect=False)
 
+        has_inflight_tools = await self._has_inflight_tool_calls()
         await self._emit({"type": "emotion_clear"})
-        if not message.interrupted:
+        if not message.interrupted and not has_inflight_tools:
             await self._emit({"type": "state", "state": "attract"})
 
         await self._clear_interrupt()
-        await self._set_executing(False)
+        if not has_inflight_tools:
+            await self._set_executing(False)
 
     async def _on_error(self, frame: ErrorFrame) -> None:
         message = str(frame.error)
@@ -983,6 +994,7 @@ class RealtimeClawVoiceService:
             run_tool=lambda args: self._tool_move_axis(
                 args, turn_state=self._ensure_turn_state()
             ),
+            wait_for_result=False,
         )
 
     async def _handle_open_claw(self, params: FunctionCallParams) -> None:
@@ -992,6 +1004,7 @@ class RealtimeClawVoiceService:
             run_tool=lambda args: self._tool_open_claw(
                 args, turn_state=self._ensure_turn_state()
             ),
+            wait_for_result=False,
         )
 
     async def _handle_lower_claw(self, params: FunctionCallParams) -> None:
@@ -1001,6 +1014,7 @@ class RealtimeClawVoiceService:
             run_tool=lambda args: self._tool_lower_claw(
                 args, turn_state=self._ensure_turn_state()
             ),
+            wait_for_result=False,
         )
 
     async def _handle_raise_claw(self, params: FunctionCallParams) -> None:
@@ -1010,6 +1024,7 @@ class RealtimeClawVoiceService:
             run_tool=lambda args: self._tool_raise_claw(
                 args, turn_state=self._ensure_turn_state()
             ),
+            wait_for_result=False,
         )
 
     async def _handle_close_claw(self, params: FunctionCallParams) -> None:
@@ -1019,6 +1034,7 @@ class RealtimeClawVoiceService:
             run_tool=lambda args: self._tool_close_claw(
                 args, turn_state=self._ensure_turn_state()
             ),
+            wait_for_result=False,
         )
 
     async def _handle_home_z(self, params: FunctionCallParams) -> None:
@@ -1028,6 +1044,7 @@ class RealtimeClawVoiceService:
             run_tool=lambda args: self._tool_home_z(
                 args, turn_state=self._ensure_turn_state()
             ),
+            wait_for_result=False,
         )
 
     async def _handle_home(self, params: FunctionCallParams) -> None:
@@ -1037,6 +1054,7 @@ class RealtimeClawVoiceService:
             run_tool=lambda args: self._tool_home(
                 args, turn_state=self._ensure_turn_state()
             ),
+            wait_for_result=False,
         )
 
     async def _handle_get_state(self, params: FunctionCallParams) -> None:
@@ -1078,6 +1096,7 @@ class RealtimeClawVoiceService:
         *,
         tool_name: str,
         run_tool: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]],
+        wait_for_result: bool = True,
     ) -> None:
         args = dict(params.arguments) if isinstance(params.arguments, Mapping) else {}
         was_queued = self._tool_call_lock.locked()
@@ -1088,6 +1107,21 @@ class RealtimeClawVoiceService:
                 tool_name,
                 self._queued_tool_calls,
             )
+        if not wait_for_result:
+            await self._set_executing(True)
+            await self._increment_inflight_tool_calls()
+            task = asyncio.create_task(
+                self._run_serialized_tool_call_background(
+                    tool_name=tool_name,
+                    run_tool=run_tool,
+                    args=args,
+                    was_queued=was_queued,
+                )
+            )
+            self._background_tool_tasks.add(task)
+            task.add_done_callback(self._background_tool_tasks.discard)
+            await params.result_callback({"ok": True, "accepted": True, "tool": tool_name})
+            return
         try:
             async with self._tool_call_lock:
                 result = await run_tool(args)
@@ -1100,6 +1134,53 @@ class RealtimeClawVoiceService:
         finally:
             if was_queued:
                 self._queued_tool_calls = max(0, self._queued_tool_calls - 1)
+
+    async def _run_serialized_tool_call_background(
+        self,
+        *,
+        tool_name: str,
+        run_tool: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]],
+        args: dict[str, Any],
+        was_queued: bool,
+    ) -> None:
+        try:
+            async with self._tool_call_lock:
+                await run_tool(args)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Background tool call failed: %s", tool_name)
+            await self._emit_step("claw_execute", "error")
+            await self._emit_step("result_evaluate", "error")
+        finally:
+            if was_queued:
+                self._queued_tool_calls = max(0, self._queued_tool_calls - 1)
+            remaining = await self._decrement_inflight_tool_calls()
+            if remaining == 0:
+                await self._maybe_finalize_after_tool_calls()
+
+    async def _increment_inflight_tool_calls(self) -> None:
+        async with self._state_lock:
+            self._inflight_tool_calls += 1
+
+    async def _decrement_inflight_tool_calls(self) -> int:
+        async with self._state_lock:
+            self._inflight_tool_calls = max(0, self._inflight_tool_calls - 1)
+            return self._inflight_tool_calls
+
+    async def _has_inflight_tool_calls(self) -> bool:
+        async with self._state_lock:
+            return self._inflight_tool_calls > 0
+
+    async def _maybe_finalize_after_tool_calls(self) -> None:
+        if self._assistant_started_speaking_at > 0:
+            return
+        if self._user_currently_speaking:
+            return
+        await self._emit({"type": "emotion_clear"})
+        await self._emit({"type": "state", "state": "attract"})
+        await self._clear_interrupt()
+        await self._set_executing(False)
 
     async def _tool_move_axis(
         self, arguments: dict[str, Any], *, turn_state: dict[str, Any]
