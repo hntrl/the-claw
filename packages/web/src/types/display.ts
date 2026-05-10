@@ -27,6 +27,7 @@ export type SpriteMood =
   | "calm"
   | "blink"
   | "wink"
+  | "listening"
   | "suspicious"
   | "excited"
   | "confused"
@@ -41,6 +42,7 @@ export const spriteMoods: SpriteMood[] = [
   "calm",
   "blink",
   "wink",
+  "listening",
   "suspicious",
   "excited",
   "confused",

@@ -7,7 +7,7 @@ import math
 import os
 import time
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import Any, Awaitable, Callable, Literal
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
@@ -142,6 +142,9 @@ Rules:
 - If a tool returns status LIMIT, mention it briefly.
 - If a tool returns status STUCK, say a motor appears stuck and stop chaining moves.
 - If state shows z_homed is false and user asks for lower/grab/deliver behavior, suggest home_z() first.
+- If a tool call is running, do not narrate "checking status" filler; wait for tool results first.
+- Never mention internal runtime mechanics like queues, queue depth, pending jobs, function calls, tools, or status polling.
+- Speak only user-facing claw actions/results (for example: moving, grabbing, stopping), never implementation details.
 - For non-action questions, answer briefly without motion tools.
 - End each turn with one short spoken sentence.
 """
@@ -301,6 +304,8 @@ class RealtimeClawVoiceService:
         self._state_lock = asyncio.Lock()
         self._queue_lock = asyncio.Lock()
         self._input_audio_lock = asyncio.Lock()
+        self._tool_call_lock = asyncio.Lock()
+        self._queued_tool_calls = 0
 
         # server.py owns process signals and coordinates websocket/stdin/mic
         # teardown. Letting Pipecat also handle SIGINT can cancel only the
@@ -972,61 +977,129 @@ class RealtimeClawVoiceService:
         return
 
     async def _handle_move_axis(self, params: FunctionCallParams) -> None:
-        args = dict(params.arguments) if isinstance(params.arguments, Mapping) else {}
-        result = await self._tool_move_axis(args, turn_state=self._ensure_turn_state())
-        await params.result_callback(result)
+        await self._run_serialized_tool_call(
+            params,
+            tool_name="move_axis",
+            run_tool=lambda args: self._tool_move_axis(
+                args, turn_state=self._ensure_turn_state()
+            ),
+        )
 
     async def _handle_open_claw(self, params: FunctionCallParams) -> None:
-        args = dict(params.arguments) if isinstance(params.arguments, Mapping) else {}
-        result = await self._tool_open_claw(args, turn_state=self._ensure_turn_state())
-        await params.result_callback(result)
+        await self._run_serialized_tool_call(
+            params,
+            tool_name="open_claw",
+            run_tool=lambda args: self._tool_open_claw(
+                args, turn_state=self._ensure_turn_state()
+            ),
+        )
 
     async def _handle_lower_claw(self, params: FunctionCallParams) -> None:
-        args = dict(params.arguments) if isinstance(params.arguments, Mapping) else {}
-        result = await self._tool_lower_claw(args, turn_state=self._ensure_turn_state())
-        await params.result_callback(result)
+        await self._run_serialized_tool_call(
+            params,
+            tool_name="lower_claw",
+            run_tool=lambda args: self._tool_lower_claw(
+                args, turn_state=self._ensure_turn_state()
+            ),
+        )
 
     async def _handle_raise_claw(self, params: FunctionCallParams) -> None:
-        args = dict(params.arguments) if isinstance(params.arguments, Mapping) else {}
-        result = await self._tool_raise_claw(args, turn_state=self._ensure_turn_state())
-        await params.result_callback(result)
+        await self._run_serialized_tool_call(
+            params,
+            tool_name="raise_claw",
+            run_tool=lambda args: self._tool_raise_claw(
+                args, turn_state=self._ensure_turn_state()
+            ),
+        )
 
     async def _handle_close_claw(self, params: FunctionCallParams) -> None:
-        args = dict(params.arguments) if isinstance(params.arguments, Mapping) else {}
-        result = await self._tool_close_claw(args, turn_state=self._ensure_turn_state())
-        await params.result_callback(result)
+        await self._run_serialized_tool_call(
+            params,
+            tool_name="close_claw",
+            run_tool=lambda args: self._tool_close_claw(
+                args, turn_state=self._ensure_turn_state()
+            ),
+        )
 
     async def _handle_home_z(self, params: FunctionCallParams) -> None:
-        args = dict(params.arguments) if isinstance(params.arguments, Mapping) else {}
-        result = await self._tool_home_z(args, turn_state=self._ensure_turn_state())
-        await params.result_callback(result)
+        await self._run_serialized_tool_call(
+            params,
+            tool_name="home_z",
+            run_tool=lambda args: self._tool_home_z(
+                args, turn_state=self._ensure_turn_state()
+            ),
+        )
 
     async def _handle_home(self, params: FunctionCallParams) -> None:
-        args = dict(params.arguments) if isinstance(params.arguments, Mapping) else {}
-        result = await self._tool_home(args, turn_state=self._ensure_turn_state())
-        await params.result_callback(result)
+        await self._run_serialized_tool_call(
+            params,
+            tool_name="home",
+            run_tool=lambda args: self._tool_home(
+                args, turn_state=self._ensure_turn_state()
+            ),
+        )
 
     async def _handle_get_state(self, params: FunctionCallParams) -> None:
-        args = dict(params.arguments) if isinstance(params.arguments, Mapping) else {}
-        result = await self._tool_get_state(args, turn_state=self._ensure_turn_state())
-        await params.result_callback(result)
+        await self._run_serialized_tool_call(
+            params,
+            tool_name="get_state",
+            run_tool=lambda args: self._tool_get_state(
+                args, turn_state=self._ensure_turn_state()
+            ),
+        )
 
     async def _handle_halt(self, params: FunctionCallParams) -> None:
-        args = dict(params.arguments) if isinstance(params.arguments, Mapping) else {}
-        result = await self._tool_halt(args, turn_state=self._ensure_turn_state())
-        await params.result_callback(result)
+        await self._run_serialized_tool_call(
+            params,
+            tool_name="halt",
+            run_tool=lambda args: self._tool_halt(
+                args, turn_state=self._ensure_turn_state()
+            ),
+        )
 
     async def _handle_reset_emergency(self, params: FunctionCallParams) -> None:
-        args = dict(params.arguments) if isinstance(params.arguments, Mapping) else {}
-        result = await self._tool_reset_emergency(
-            args, turn_state=self._ensure_turn_state()
+        await self._run_serialized_tool_call(
+            params,
+            tool_name="reset_emergency",
+            run_tool=lambda args: self._tool_reset_emergency(
+                args, turn_state=self._ensure_turn_state()
+            ),
         )
-        await params.result_callback(result)
 
     async def _handle_set_expression(self, params: FunctionCallParams) -> None:
+        # Expression changes are display-only and should remain low-latency.
         args = dict(params.arguments) if isinstance(params.arguments, Mapping) else {}
         result = await self._tool_set_expression(args)
         await params.result_callback(result)
+
+    async def _run_serialized_tool_call(
+        self,
+        params: FunctionCallParams,
+        *,
+        tool_name: str,
+        run_tool: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]],
+    ) -> None:
+        args = dict(params.arguments) if isinstance(params.arguments, Mapping) else {}
+        was_queued = self._tool_call_lock.locked()
+        if was_queued:
+            self._queued_tool_calls += 1
+            logger.debug(
+                "Tool call queued: %s (queue_depth=%s)",
+                tool_name,
+                self._queued_tool_calls,
+            )
+        try:
+            async with self._tool_call_lock:
+                result = await run_tool(args)
+                await params.result_callback(result)
+        except Exception as exc:
+            logger.exception("Tool call failed: %s", tool_name)
+            await params.result_callback(
+                {"ok": False, "error": str(exc), "tool": tool_name}
+            )
+        finally:
+            if was_queued:
+                self._queued_tool_calls = max(0, self._queued_tool_calls - 1)
 
     async def _tool_move_axis(
         self, arguments: dict[str, Any], *, turn_state: dict[str, Any]

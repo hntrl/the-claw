@@ -21,7 +21,7 @@ export const visualStateMap: Record<MachineState, VisualState> = {
     accentColor: "#8ec8ff",
   },
   listening: {
-    sprite: "thinking",
+    sprite: "listening",
     backgroundMode: "audioGrid",
     headline: "LISTENING...",
     subtitle: "Parsing human intent",
@@ -30,7 +30,7 @@ export const visualStateMap: Record<MachineState, VisualState> = {
     accentColor: "#8ec8ff",
   },
   transcribing: {
-    sprite: "thinking",
+    sprite: "listening",
     backgroundMode: "audioGrid",
     headline: "TRANSCRIBING...",
     showTranscript: true,
@@ -80,7 +80,7 @@ export const visualStateMap: Record<MachineState, VisualState> = {
     accentColor: "#ffe78a",
   },
   failure: {
-    sprite: "thinking",
+    sprite: "nervous",
     backgroundMode: "glitch",
     headline: "TARGET ESCAPED",
     subtitle: "Recalibrating emotionally...",
@@ -89,7 +89,7 @@ export const visualStateMap: Record<MachineState, VisualState> = {
     accentColor: "#ff606d",
   },
   error: {
-    sprite: "thinking",
+    sprite: "nervous",
     backgroundMode: "glitch",
     headline: "SYSTEM ERROR",
     subtitle: "Manual vibes required.",

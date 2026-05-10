@@ -1,7 +1,6 @@
 import { useMemo } from "react";
+import { AgentScreen } from "./components/AgentScreen";
 import { DebugFieldPanel } from "./components/DebugFieldPanel";
-import { VerticalTVFrame } from "./components/VerticalTVFrame";
-import { VectorCRTCanvas } from "./components/VectorCRTCanvas";
 import { useClientMicStream } from "./hooks/useClientMicStream";
 import { useKeyboardDebug } from "./hooks/useKeyboardDebug";
 import { useDisplaySocket } from "./hooks/useDisplaySocket";
@@ -30,9 +29,7 @@ function App() {
 
   return (
     <>
-      <VerticalTVFrame>
-        <VectorCRTCanvas mood={moodOverride} keyboardOverlay={keyboardOverlay} />
-      </VerticalTVFrame>
+      <AgentScreen mood={moodOverride} keyboardOverlay={keyboardOverlay} />
       <button
         aria-label={mic.muted ? "Unmute microphone" : "Mute microphone"}
         className={`mic-toggle ${mic.muted ? "is-muted" : "is-live"}`}

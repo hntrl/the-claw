@@ -42,8 +42,7 @@ export const SpriteStage = ({ mood }: SpriteStageProps) => {
     };
   }, [machineState, mood, moodOverride]);
 
-  const resolvedMood =
-    mood ?? moodOverride ?? (machineState === "attract" ? (isBlinking ? "blink" : "calm") : mappedMood);
+  const resolvedMood = mood ?? moodOverride ?? (machineState === "attract" ? (isBlinking ? "blink" : "calm") : mappedMood);
 
   const spriteSrc = useMemo(() => {
     return spriteByMood[resolvedMood] ?? spriteByMood[fallbackSpriteMood];
