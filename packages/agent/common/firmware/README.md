@@ -1,7 +1,7 @@
 # Claw Controller Firmware
 
 This directory contains the Arduino firmware used by the shared
-`claw_controller` Python package.
+`common/claw_controller` Python module in `packages/agent`.
 
 ## Sketch
 

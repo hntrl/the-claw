@@ -3,7 +3,7 @@
 This repo is now organized as a lightweight monorepo:
 
 - `packages/web/`: Vite + React display app
-- `packages/agent/`: Python Pipecat/LangChain voice + tool orchestration service
+- `packages/agent/`: Python realtime voice + tool orchestration service
 - `packages/old/`: archived previous prototype/runtime
 
 ## One-command demo

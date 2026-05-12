@@ -202,7 +202,7 @@ export const useClientMicStream = (
     void (async () => {
       const started = await startCapture();
       if (!started && !cancelled) {
-        setMuted(true);
+        setMode("off");
       }
     })();
 

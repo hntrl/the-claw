@@ -1,15 +1,15 @@
 [project]
 name = "interrupt-claw-agent"
 version = "0.1.0"
-description = "Pipecat-powered agent backend for the Interrupt claw display demo"
+description = "Realtime-powered agent backend for the Interrupt claw display demo"
 requires-python = ">=3.11"
 dependencies = [
-  "cartesia[websockets]>=3.0.0",
   "langchain>=1.0.0",
   "langchain-openai>=1.0.0",
   "numpy>=2.0.0",
   "openai>=2.0.0",
   "pipecat-ai>=1.0.0",
+  "pynput>=1.7.7",
   "pydantic>=2.9.0",
   "pyserial>=3.5",
   "python-dotenv>=1.0.1",

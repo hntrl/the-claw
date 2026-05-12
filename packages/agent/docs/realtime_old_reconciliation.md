@@ -44,7 +44,7 @@ This document maps `packages/old/agent/app.py` behavior onto `packages/agent/rea
 ## Execution/State Behavior
 
 ### Preserved
-- Tool results include state snapshots (`state`) alongside command status (`ok`, `status`, `command`, `error`, `events`) via the shared `packages/claw_controller` facade.
+- Tool results include state snapshots (`state`) alongside command status (`ok`, `status`, `command`, `error`, `events`) via the shared `packages/agent/common/claw_controller` module.
 - Real/noop backend abstraction remains, both routed through legacy protocol semantics.
 
 ### Intentional departures
@@ -55,5 +55,5 @@ This document maps `packages/old/agent/app.py` behavior onto `packages/agent/rea
 
 ## Files Updated
 - `packages/agent/realtime_service/service.py`
-- `packages/claw_controller/src/claw_controller/controller.py`
-- `packages/claw_controller/firmware/claw_machine_V4_agent/claw_machine_V4_agent.ino`
+- `packages/agent/common/claw_controller/controller.py`
+- `packages/agent/common/firmware/claw_machine_V4_agent/claw_machine_V4_agent.ino`

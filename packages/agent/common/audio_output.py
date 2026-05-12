@@ -14,7 +14,7 @@ AudioDType = Literal["int16", "float32"]
 
 
 class LocalAudioOutput:
-    """Shared local speaker sink used by both realtime and pipecat runtimes."""
+    """Shared local speaker sink used by the realtime runtime."""
 
     def __init__(self) -> None:
         output_device = os.getenv("AGENT_AUDIO_OUTPUT_DEVICE", "").strip()
