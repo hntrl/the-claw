@@ -6,6 +6,7 @@ import logging
 import math
 import os
 import time
+from collections import deque
 from collections.abc import Mapping
 from typing import Any, Awaitable, Callable, Literal
 
@@ -305,6 +306,7 @@ class RealtimeClawVoiceService:
         self._state_lock = asyncio.Lock()
         self._queue_lock = asyncio.Lock()
         self._input_audio_lock = asyncio.Lock()
+        self._text_submit_lock = asyncio.Lock()
         self._tool_call_lock = asyncio.Lock()
         self._queued_tool_calls = 0
         self._inflight_tool_calls = 0
@@ -339,6 +341,7 @@ class RealtimeClawVoiceService:
         self._audio_error_logged = False
         self._audio_error_count = 0
         self._pending_input_audio = bytearray()
+        self._pending_text_turns: deque[str] = deque()
         self._realtime_recovery_task: asyncio.Task[None] | None = None
         self._last_realtime_recovery_at = 0.0
 
@@ -447,6 +450,7 @@ class RealtimeClawVoiceService:
         self._assistant_aggregator = None
         async with self._input_audio_lock:
             self._pending_input_audio.clear()
+        self._pending_text_turns.clear()
         await self._audio_output.close()
         await self._claw_controller.stop()
 
@@ -593,20 +597,33 @@ class RealtimeClawVoiceService:
             return
 
         await self._ensure_started()
-        if await self.is_executing():
+        async with self._text_submit_lock:
             has_inflight_tools = await self._has_inflight_tool_calls()
+            is_executing = await self.is_executing()
             has_active_turn = (
                 self._assistant_started_speaking_at > 0
                 or self._user_currently_speaking
                 or has_inflight_tools
             )
-            if has_active_turn:
+
+            if is_executing and has_active_turn:
+                self._pending_text_turns.append(normalized)
                 await self.request_interrupt()
-            else:
-                # Guard against stale execution state when turn-stopped events
-                # are missed: allow new text turns to proceed.
+                return
+
+            if is_executing and not has_inflight_tools:
+                # Stale local execution state (missed stop callback): normalize.
                 await self._clear_interrupt()
                 await self._set_executing(False)
+
+            await self._start_text_turn(normalized)
+
+    async def _start_text_turn(self, normalized: str) -> None:
+        # Normalize speech-state flags for text turns.
+        self._assistant_started_speaking_at = 0.0
+        self._assistant_stopped_speaking_at = time.monotonic()
+        self._barge_in_voice_accum_s = 0.0
+        self._user_currently_speaking = False
 
         await self._begin_turn(from_audio=False)
         await self._emit_step("speech_to_text", "active")
@@ -626,6 +643,15 @@ class RealtimeClawVoiceService:
                 run_llm=True,
             )
         )
+
+    async def _start_next_pending_text_turn(self) -> None:
+        async with self._text_submit_lock:
+            if await self.is_executing():
+                return
+            if not self._pending_text_turns:
+                return
+            next_text = self._pending_text_turns.popleft()
+            await self._start_text_turn(next_text)
 
     def _reset_turn_state(
         self, *, user_text: str, thinking_started: bool, stt_complete: bool
@@ -750,6 +776,7 @@ class RealtimeClawVoiceService:
         await self._clear_interrupt()
         if not has_inflight_tools:
             await self._set_executing(False)
+            await self._start_next_pending_text_turn()
 
     async def _on_error(self, frame: ErrorFrame) -> None:
         message = str(frame.error)
@@ -767,6 +794,7 @@ class RealtimeClawVoiceService:
         await self._emit({"type": "state", "state": "attract"})
         await self._clear_interrupt()
         await self._set_executing(False)
+        await self._start_next_pending_text_turn()
 
     def _is_recoverable_realtime_session_error(self, message: str) -> bool:
         normalized = message.lower()
@@ -823,6 +851,7 @@ class RealtimeClawVoiceService:
             if not has_inflight_tools:
                 await self._set_executing(False)
                 await self._emit({"type": "state", "state": "attract"})
+                await self._start_next_pending_text_turn()
         except Exception as exc:
             logger.warning("Realtime session reset failed: %s", exc)
             await self._emit({"type": "state", "state": "error"})
@@ -1208,6 +1237,7 @@ class RealtimeClawVoiceService:
         await self._emit({"type": "state", "state": "attract"})
         await self._clear_interrupt()
         await self._set_executing(False)
+        await self._start_next_pending_text_turn()
 
     async def _tool_move_axis(
         self, arguments: dict[str, Any], *, turn_state: dict[str, Any]
