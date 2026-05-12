@@ -5,7 +5,6 @@ import asyncio
 import json
 import os
 import signal
-import sys
 import threading
 from collections.abc import Sequence
 from contextlib import suppress
@@ -127,41 +126,6 @@ class PushToTalkGate:
 
     def is_active(self) -> bool:
         return (not self.enabled) or self._pressed.is_set()
-
-
-async def _stdin_loop(agent: AgentRuntime, stop_event: asyncio.Event) -> None:
-    if not sys.stdin.isatty():
-        return
-
-    print("utterance> ", end="", flush=True)
-    while not stop_event.is_set():
-        line = await asyncio.to_thread(sys.stdin.readline)
-        if not line:
-            await asyncio.sleep(0.05)
-            continue
-
-        text = line.strip()
-        if not text:
-            print("utterance> ", end="", flush=True)
-            continue
-        if text == "/quit":
-            stop_event.set()
-            break
-        if text == "/help":
-            print("commands: /help, /quit, /text <prompt>")
-            print("utterance> ", end="", flush=True)
-            continue
-
-        try:
-            if text.startswith("/text "):
-                await agent.submit_raw_text(
-                    text.removeprefix("/text "), source="stdin-text"
-                )
-            else:
-                await agent.submit_utterance(text, source="stdin")
-        except Exception as exc:
-            print(f"[agent] input submit failed: {exc}")
-        print("utterance> ", end="", flush=True)
 
 
 async def _demo_loop(agent: AgentRuntime, stop_event: asyncio.Event, interval_ms: int) -> None:
@@ -372,17 +336,12 @@ async def run(args: argparse.Namespace) -> None:
             f"barge_min_ms={os.getenv('OPENAI_REALTIME_BARGE_IN_MIN_MS', '120')}"
         )
     print(f"[agent] realtime model: {os.getenv('OPENAI_REALTIME_MODEL', 'gpt-realtime-2')}")
-    if sys.stdin.isatty():
-        print("[agent] type an utterance and press enter (/help, /quit)")
-
     loop = asyncio.get_running_loop()
     with suppress(NotImplementedError):
         loop.add_signal_handler(signal.SIGINT, stop_event.set)
         loop.add_signal_handler(signal.SIGTERM, stop_event.set)
 
-    tasks: list[asyncio.Task[None]] = [
-        asyncio.create_task(_stdin_loop(agent, stop_event)),
-    ]
+    tasks: list[asyncio.Task[None]] = []
     if args.demo:
         tasks.append(asyncio.create_task(_demo_loop(agent, stop_event, demo_interval_ms)))
     if args.mic:

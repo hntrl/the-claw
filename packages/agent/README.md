@@ -60,13 +60,6 @@ just agent-audio-devices
 
 ## Sending utterances
 
-- Type into the agent terminal directly.
-- Prefix terminal input with `/text ` to bypass speech input:
-
-```txt
-/text grab the blue duck near front left
-```
-
 - Speak into your microphone when `--mic` is enabled.
 - Or send websocket messages:
 

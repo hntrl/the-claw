@@ -594,7 +594,19 @@ class RealtimeClawVoiceService:
 
         await self._ensure_started()
         if await self.is_executing():
-            await self.request_interrupt()
+            has_inflight_tools = await self._has_inflight_tool_calls()
+            has_active_turn = (
+                self._assistant_started_speaking_at > 0
+                or self._user_currently_speaking
+                or has_inflight_tools
+            )
+            if has_active_turn:
+                await self.request_interrupt()
+            else:
+                # Guard against stale execution state when turn-stopped events
+                # are missed: allow new text turns to proceed.
+                await self._clear_interrupt()
+                await self._set_executing(False)
 
         await self._begin_turn(from_audio=False)
         await self._emit_step("speech_to_text", "active")
