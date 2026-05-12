@@ -541,7 +541,7 @@ class RealtimeClawVoiceService:
             return self._interrupt_requested
 
     async def _ensure_started(self) -> None:
-        if self._runner_task is None:
+        if self._runner_task is None or self._runner_task.done():
             await self.start()
 
     async def _queue_frame(self, frame: Frame) -> None:
@@ -741,8 +741,8 @@ class RealtimeClawVoiceService:
 
     async def _on_error(self, frame: ErrorFrame) -> None:
         message = str(frame.error)
-        if self._is_recoverable_realtime_audio_error(message):
-            logger.debug("Ignoring realtime cancellation race: %s", message)
+        if self._is_recoverable_realtime_session_error(message):
+            logger.debug("Recovering realtime session after recoverable error: %s", message)
             await self._schedule_realtime_recovery(message)
             return
 
@@ -756,14 +756,22 @@ class RealtimeClawVoiceService:
         await self._clear_interrupt()
         await self._set_executing(False)
 
-    def _is_recoverable_realtime_audio_error(self, message: str) -> bool:
+    def _is_recoverable_realtime_session_error(self, message: str) -> bool:
         normalized = message.lower()
         return (
             "no active response found" in normalized
+            or "active response in progress" in normalized
+            or "conversation already has an active response" in normalized
+            or "response failed" in normalized
+            or "response expired" in normalized
+            or "response not found" in normalized
             or "already shorter than" in normalized
             or "input_audio_buffer_commit_empty" in normalized
             or "buffer too small" in normalized
             or "audio buffer" in normalized
+            or "keepalive ping timeout" in normalized
+            or "connection closed" in normalized
+            or "connection reset by peer" in normalized
         )
 
     async def _schedule_realtime_recovery(self, reason: str) -> None:
@@ -789,13 +797,20 @@ class RealtimeClawVoiceService:
         if llm is None:
             return
 
-        logger.warning(
-            "Resetting realtime session after audio-buffer error: %s", reason
-        )
+        logger.warning("Resetting realtime session after recoverable error: %s", reason)
+        self._assistant_started_speaking_at = 0.0
+        self._assistant_stopped_speaking_at = 0.0
+        self._barge_in_voice_accum_s = 0.0
+        self._user_currently_speaking = False
+        await self._clear_interrupt()
         await self._emit({"type": "state", "state": "listening"})
         try:
             await llm.reset_conversation()
             await self._queue_frame(LLMSetToolsFrame(tools=self._tools_schema))
+            has_inflight_tools = await self._has_inflight_tool_calls()
+            if not has_inflight_tools:
+                await self._set_executing(False)
+                await self._emit({"type": "state", "state": "attract"})
         except Exception as exc:
             logger.warning("Realtime session reset failed: %s", exc)
             await self._emit({"type": "state", "state": "error"})
