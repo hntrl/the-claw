@@ -201,8 +201,8 @@
 // Z reach: 6 feet of extension below the ceiling (Z=0). At ~360 deg/ft on the
 // current spool, that's 2160 degrees of motor travel. Z_REFERENCE is the
 // default drop depth (3 feet), used for informational STATE reporting.
-const float Z_MAX_DOWN_DEGREES       = 2160.0;  // HARD safety: 6 feet of cable
-const float Z_REFERENCE_DOWN_DEGREES = 1080.0;  // informational, ~3 feet
+const float Z_MAX_DOWN_DEGREES       = 1080.0;  // WAS 2160 and had overrotation issues.  HARD safety: 6 feet of cable
+const float Z_REFERENCE_DOWN_DEGREES = 800.0;  // WAS 1080. informational, ~2 feet
 
 // Z direction sign: set to +1 if positive AccelStepper steps physically
 // move the claw DOWN. Set to -1 if positive steps move it UP. The agent
@@ -312,18 +312,18 @@ const uint8_t LIMIT_DEBOUNCE_READS = 3;
 // Claw servo angles (absolute 0-180 range, but clamped to physical limits below)
 // PHYSICAL LIMITS — any requested angle is clamped to [SERVO_MIN_ANGLE, SERVO_MAX_ANGLE]
 // to protect the servo from attempting impossible positions.
-const int SERVO_MIN_ANGLE    = 25;   // Physical limit: fully closed
+const int SERVO_MIN_ANGLE    = 23;   // Physical limit: fully closed
 const int SERVO_MAX_ANGLE    = 90;   // Physical limit: fully open
 const int SERVO_OPEN_ANGLE   = 90;   // Default "open" angle (at max limit)
-const int SERVO_CLOSED_ANGLE = 25;   // Default "closed" angle (at min limit)
+const int SERVO_CLOSED_ANGLE = 23;   // Default "closed" angle (at min limit)
 const int SERVO_START_ANGLE  = 90;   // Boot angle (open)
 const int SERVO_HOME_ANGLE   = 90;   // Open position after homing
 
 // Stepper speed/acceleration
 const float MAX_SPEED     = 600;   // steps/sec
 const float ACCELERATION  = 300;    // steps/sec^2
-const float Z_MAX_SPEED   = 600;
-const float Z_ACCELERATION = 300;
+const float Z_MAX_SPEED   = 400;  // was 600
+const float Z_ACCELERATION = 250;  // was 300
 
 // Motor idle timeout — very long so motors stay energized and the claw does not
 // fall under gravity. If you want auto-disable back, lower this value.
