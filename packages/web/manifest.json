@@ -1,0 +1,75 @@
+{
+  "project": "Interrupt voice-controlled claw machine TV activation",
+  "asset_notes": {
+    "transparent_no_labels": "Individual sprite portraits cropped from generated 2x2 sheets. Near-black background pixels are transparent; labels are removed.",
+    "quadrants_with_labels": "Individual 2x2 quadrant crops retaining the text label.",
+    "spritesheets": "Original 2x2 generated sheets."
+  },
+  "sprites": {
+    "calm": {
+      "transparent_no_labels": "sprites/transparent_no_labels/calm.png",
+      "quadrant_with_label": "sprites/quadrants_with_labels/calm.png",
+      "source_sheet": "spritesheets/row1_calm_blink_wink_suspicious.png"
+    },
+    "blink": {
+      "transparent_no_labels": "sprites/transparent_no_labels/blink.png",
+      "quadrant_with_label": "sprites/quadrants_with_labels/blink.png",
+      "source_sheet": "spritesheets/row1_calm_blink_wink_suspicious.png"
+    },
+    "wink": {
+      "transparent_no_labels": "sprites/transparent_no_labels/wink.png",
+      "quadrant_with_label": "sprites/quadrants_with_labels/wink.png",
+      "source_sheet": "spritesheets/row1_calm_blink_wink_suspicious.png"
+    },
+    "listening": {
+      "transparent_no_labels": "sprites/transparent_no_labels/listening.png",
+      "quadrant_with_label": "sprites/quadrants_with_labels/listening.png",
+      "source_sheet": "spritesheets/user_added_listening.png"
+    },
+    "suspicious": {
+      "transparent_no_labels": "sprites/transparent_no_labels/suspicious.png",
+      "quadrant_with_label": "sprites/quadrants_with_labels/suspicious.png",
+      "source_sheet": "spritesheets/row1_calm_blink_wink_suspicious.png"
+    },
+    "excited": {
+      "transparent_no_labels": "sprites/transparent_no_labels/excited.png",
+      "quadrant_with_label": "sprites/quadrants_with_labels/excited.png",
+      "source_sheet": "spritesheets/row2_excited_confused_thinking_nervous.png"
+    },
+    "confused": {
+      "transparent_no_labels": "sprites/transparent_no_labels/confused.png",
+      "quadrant_with_label": "sprites/quadrants_with_labels/confused.png",
+      "source_sheet": "spritesheets/row2_excited_confused_thinking_nervous.png"
+    },
+    "thinking": {
+      "transparent_no_labels": "sprites/transparent_no_labels/thinking.png",
+      "quadrant_with_label": "sprites/quadrants_with_labels/thinking.png",
+      "source_sheet": "spritesheets/row2_excited_confused_thinking_nervous.png"
+    },
+    "nervous": {
+      "transparent_no_labels": "sprites/transparent_no_labels/nervous.png",
+      "quadrant_with_label": "sprites/quadrants_with_labels/nervous.png",
+      "source_sheet": "spritesheets/row2_excited_confused_thinking_nervous.png"
+    },
+    "stressed": {
+      "transparent_no_labels": "sprites/transparent_no_labels/stressed.png",
+      "quadrant_with_label": "sprites/quadrants_with_labels/stressed.png",
+      "source_sheet": "spritesheets/row3_stressed_disappointed_surprised_love.png"
+    },
+    "disappointed": {
+      "transparent_no_labels": "sprites/transparent_no_labels/disappointed.png",
+      "quadrant_with_label": "sprites/quadrants_with_labels/disappointed.png",
+      "source_sheet": "spritesheets/row3_stressed_disappointed_surprised_love.png"
+    },
+    "surprised": {
+      "transparent_no_labels": "sprites/transparent_no_labels/surprised.png",
+      "quadrant_with_label": "sprites/quadrants_with_labels/surprised.png",
+      "source_sheet": "spritesheets/row3_stressed_disappointed_surprised_love.png"
+    },
+    "love": {
+      "transparent_no_labels": "sprites/transparent_no_labels/love.png",
+      "quadrant_with_label": "sprites/quadrants_with_labels/love.png",
+      "source_sheet": "spritesheets/row3_stressed_disappointed_surprised_love.png"
+    }
+  }
+}
