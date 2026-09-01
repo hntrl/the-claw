@@ -1,10 +1,26 @@
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import Literal
 
+from serial.tools import list_ports
+
 from .types import ExecutionOutcome
+
+log = logging.getLogger(__name__)
+
+_DEFAULT_SERIAL_PORT = "/dev/tty.usbmodem"
+_USB_SERIAL_PREFIXES = (
+    "/dev/cu.usbmodem",
+    "/dev/cu.usbserial",
+    "/dev/tty.usbmodem",
+    "/dev/tty.usbserial",
+    "/dev/ttyACM",
+    "/dev/ttyUSB",
+    "COM",
+)
 
 ResultMode = Literal["pending", "random"]
 
@@ -36,10 +52,79 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_usb_id(name: str) -> int | None:
+    value = os.getenv(name, "").strip()
+    if not value:
+        return None
+    try:
+        return int(value, 0)
+    except ValueError:
+        try:
+            return int(value, 16)
+        except ValueError:
+            log.warning("Ignoring invalid %s=%r; use a decimal or hexadecimal USB ID", name, value)
+            return None
+
+
+def _discover_serial_port() -> str:
+    vid = _env_usb_id("CLAW_SERIAL_VID")
+    pid = _env_usb_id("CLAW_SERIAL_PID")
+    match = os.getenv("CLAW_SERIAL_MATCH", "").strip().lower()
+    candidates = []
+
+    for port in list_ports.comports():
+        if not port.device.startswith(_USB_SERIAL_PREFIXES):
+            continue
+        if vid is not None and port.vid != vid:
+            continue
+        if pid is not None and port.pid != pid:
+            continue
+        details = " ".join(
+            str(value or "")
+            for value in (port.device, port.description, port.manufacturer, port.product, port.hwid)
+        ).lower()
+        if match and match not in details:
+            continue
+        candidates.append(port)
+
+    arduino_candidates = [
+        port
+        for port in candidates
+        if "arduino" in " ".join(
+            str(value or "") for value in (port.description, port.manufacturer, port.product)
+        ).lower()
+    ]
+    if len(arduino_candidates) == 1:
+        candidates = arduino_candidates
+
+    if len(candidates) == 1:
+        port = candidates[0]
+        log.info("Auto-discovered claw serial device: %s (%s)", port.device, port.description)
+        return port.device
+
+    if not candidates:
+        log.warning("No matching USB serial device found for claw controller")
+    else:
+        devices = ", ".join(sorted(port.device for port in candidates))
+        log.warning(
+            "Multiple matching USB serial devices found (%s); set CLAW_SERIAL_PORT, "
+            "CLAW_SERIAL_VID/CLAW_SERIAL_PID, or CLAW_SERIAL_MATCH to choose one",
+            devices,
+        )
+    return ""
+
+
+def _serial_port_from_env() -> str:
+    port = os.getenv("CLAW_SERIAL_PORT", "auto").strip()
+    if port and port not in {"auto", _DEFAULT_SERIAL_PORT}:
+        return port
+    return _discover_serial_port()
+
+
 @dataclass(slots=True)
 class ClawControllerConfig:
     mode: Literal["auto", "sim", "serial"] = "auto"
-    serial_port: str = "/dev/tty.usbmodem"
+    serial_port: str = ""
     serial_baud: int = 115200
     serial_timeout_s: float = 1.0
 
@@ -71,7 +156,7 @@ class ClawControllerConfig:
 
         return cls(
             mode=mode_raw,
-            serial_port=os.getenv("CLAW_SERIAL_PORT", "/dev/tty.usbmodem").strip() or "/dev/tty.usbmodem",
+            serial_port=_serial_port_from_env(),
             serial_baud=_env_int("CLAW_SERIAL_BAUD", 115200),
             serial_timeout_s=_env_float("CLAW_SERIAL_TIMEOUT_S", 1.0),
             x_move_degrees=_env_float("CLAW_MOVE_X_DEGREES", 90.0),

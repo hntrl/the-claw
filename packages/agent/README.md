@@ -81,7 +81,9 @@ Raw text over websocket:
 - `AGENT_SUCCESS_RATE` default `0.68`
 - `AGENT_DEMO_INTERVAL_MS` default `14000`
 - `CLAW_CONTROLLER_MODE` default `auto` (`auto`, `sim`, `serial`)
-- `CLAW_SERIAL_PORT` default `/dev/tty.usbmodem`
+- `CLAW_SERIAL_PORT` default `auto`, which discovers a single USB serial device; set an explicit device path to override it
+- `CLAW_SERIAL_VID` / `CLAW_SERIAL_PID` optional decimal or hexadecimal USB IDs used to select a device when more than one is attached
+- `CLAW_SERIAL_MATCH` optional case-insensitive substring matched against the device metadata when more than one is attached
 - `CLAW_SERIAL_BAUD` default `115200`
 - `CLAW_SERIAL_TIMEOUT_S` default `1.0`
 - `CLAW_MOVE_X_DEGREES` default `90`
@@ -105,6 +107,7 @@ Raw text over websocket:
 - `OPENAI_REALTIME_SPEED` optional speaking rate for realtime voice output (recommended `1.1` to `1.4`)
 - `OPENAI_REALTIME_MIN_INPUT_AUDIO_MS` default `120`, minimum PCM depth batched before forwarding to Realtime
 - `AGENT_REALTIME_PLAY_AUDIO` default `1`
+- `AGENT_REALTIME_AUDIO_WRITE_TIMEOUT_S` default `2.0`, maximum time allowed for a local speaker write before playback is reset
 - `AGENT_AUDIO_OUTPUT_DEVICE` optional (speaker device index or exact device name)
 - `AGENT_AUDIO_INPUT_DEVICE` optional (microphone device index or exact device name)
 - `AGENT_MIC_PTT_ENABLED` default `1` (`--mic` keyboard push-to-talk gate in Python process)

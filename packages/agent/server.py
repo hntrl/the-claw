@@ -272,6 +272,17 @@ async def run(args: argparse.Namespace) -> None:
         with suppress(ConnectionClosed, OSError):
             await websocket.send(json.dumps({"type": "state", "state": "attract"}))
 
+        input_tasks: set[asyncio.Task[None]] = set()
+
+        def _input_task_done(task: asyncio.Task[None]) -> None:
+            input_tasks.discard(task)
+            if task.cancelled():
+                return
+            try:
+                task.result()
+            except Exception as exc:
+                print(f"[agent] websocket text input failed: {exc}")
+
         warned_binary_unsupported = False
         warned_ws_mic_ignored = False
         try:
@@ -304,16 +315,25 @@ async def run(args: argparse.Namespace) -> None:
                 if not parsed:
                     continue
                 input_type, text = parsed
-                try:
+
+                async def submit_text(
+                    input_type: str = input_type, text: str = text
+                ) -> None:
                     if input_type == "raw_text":
                         await agent.submit_raw_text(text, source="ws-text")
                     else:
                         await agent.submit_utterance(text, source="ws")
-                except Exception as exc:
-                    print(f"[agent] websocket text input failed: {exc}")
+
+                input_task = asyncio.create_task(submit_text())
+                input_tasks.add(input_task)
+                input_task.add_done_callback(_input_task_done)
         except (ConnectionClosed, OSError):
             pass
         finally:
+            for input_task in tuple(input_tasks):
+                input_task.cancel()
+            if input_tasks:
+                await asyncio.gather(*input_tasks, return_exceptions=True)
             await broadcaster.remove_client(websocket)
 
     ws_server = await websockets.serve(handle_client, host, port)

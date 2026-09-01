@@ -7,10 +7,25 @@ const parseMessage = (payload: string): DisplayEvent[] => {
   return Array.isArray(parsed) ? parsed : [parsed];
 };
 
+const MAX_PENDING_TEXTS = 32;
+
 export const useDisplaySocket = () => {
   const applyEvent = useDisplayStore((s) => s.applyEvent);
   const setWsStatus = useDisplayStore((s) => s.setWsStatus);
   const wsRef = useRef<WebSocket | null>(null);
+  const pendingTextRef = useRef<string[]>([]);
+
+  const flushPendingText = useCallback((ws: WebSocket) => {
+    while (pendingTextRef.current.length > 0) {
+      const text = pendingTextRef.current[0];
+      try {
+        ws.send(JSON.stringify({ type: "raw_text", text }));
+      } catch {
+        return;
+      }
+      pendingTextRef.current.shift();
+    }
+  }, []);
 
   const sendRawText = useCallback((text: string): boolean => {
     const normalized = text.trim();
@@ -20,10 +35,19 @@ export const useDisplaySocket = () => {
 
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      return false;
+      if (pendingTextRef.current.length < MAX_PENDING_TEXTS) {
+        pendingTextRef.current.push(normalized);
+      }
+      return true;
     }
 
-    ws.send(JSON.stringify({ type: "raw_text", text: normalized }));
+    try {
+      ws.send(JSON.stringify({ type: "raw_text", text: normalized }));
+    } catch {
+      if (pendingTextRef.current.length < MAX_PENDING_TEXTS) {
+        pendingTextRef.current.push(normalized);
+      }
+    }
     return true;
   }, []);
 
@@ -62,6 +86,10 @@ export const useDisplaySocket = () => {
 
       ws.onopen = () => {
         backoffMs = 700;
+        const openedWs = ws;
+        if (openedWs) {
+          flushPendingText(openedWs);
+        }
         setWsStatus("connected");
       };
 
@@ -110,7 +138,7 @@ export const useDisplaySocket = () => {
       ws?.close();
       setWsStatus("disconnected");
     };
-  }, [applyEvent, setWsStatus]);
+  }, [applyEvent, flushPendingText, setWsStatus]);
 
   return { sendRawText, sendAudioChunk };
 };

@@ -1,0 +1,104 @@
+#!/bin/bash
+set -euo pipefail
+
+label="com.the-claw.demo"
+repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
+uid="$(id -u)"
+domain="gui/${uid}"
+plist_dir="$HOME/Library/LaunchAgents"
+plist_path="$plist_dir/${label}.plist"
+log_dir="$HOME/Library/Logs"
+just_bin="$(command -v just || true)"
+pnpm_bin="$(command -v pnpm || true)"
+
+if [[ -z "$just_bin" || -z "$pnpm_bin" ]]; then
+  echo "just and pnpm are required but were not found in PATH." >&2
+  exit 1
+fi
+
+runtime_path="$(dirname "$just_bin"):$(dirname "$pnpm_bin"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+is_loaded() {
+  launchctl print "${domain}/${label}" >/dev/null 2>&1
+}
+
+install() {
+  mkdir -p "$plist_dir" "$log_dir"
+  REPO_DIR="$repo_dir" JUST_BIN="$just_bin" LOG_DIR="$log_dir" PLIST_PATH="$plist_path" RUNTIME_PATH="$runtime_path" \
+    /usr/bin/python3 - <<'PY'
+import os
+import plistlib
+
+plist = {
+    "Label": "com.the-claw.demo",
+    "WorkingDirectory": os.environ["REPO_DIR"],
+    "ProgramArguments": [os.environ["JUST_BIN"], "demo"],
+    "RunAtLoad": True,
+    "KeepAlive": True,
+    "ThrottleInterval": 5,
+    "ProcessType": "Interactive",
+    "EnvironmentVariables": {
+        "PATH": os.environ["RUNTIME_PATH"],
+    },
+    "StandardOutPath": os.path.join(os.environ["LOG_DIR"], "the-claw-demo.log"),
+    "StandardErrorPath": os.path.join(os.environ["LOG_DIR"], "the-claw-demo.error.log"),
+}
+with open(os.environ["PLIST_PATH"], "wb") as f:
+    plistlib.dump(plist, f)
+PY
+  plutil -lint "$plist_path" >/dev/null
+
+  if is_loaded; then
+    launchctl bootout "${domain}/${label}"
+  fi
+  launchctl bootstrap "$domain" "$plist_path"
+  echo "Installed and started ${label}."
+}
+
+start() {
+  if is_loaded; then
+    launchctl kickstart -k "${domain}/${label}"
+    echo "Restarted ${label}."
+  else
+    [[ -f "$plist_path" ]] || install
+    if ! is_loaded; then
+      launchctl bootstrap "$domain" "$plist_path"
+    fi
+    echo "Started ${label}."
+  fi
+}
+
+stop() {
+  if is_loaded; then
+    launchctl bootout "${domain}/${label}"
+  fi
+  echo "Stopped ${label}."
+}
+
+status() {
+  if is_loaded; then
+    launchctl list "$label"
+  else
+    echo "${label} is not loaded."
+    exit 3
+  fi
+}
+
+uninstall() {
+  stop
+  rm -f "$plist_path"
+  echo "Uninstalled ${label}."
+}
+
+case "${1:-}" in
+  install) install ;;
+  start|restart) start ;;
+  stop) stop ;;
+  status) status ;;
+  uninstall) uninstall ;;
+  logs) exec tail -f "$log_dir/the-claw-demo.log" "$log_dir/the-claw-demo.error.log" ;;
+  *)
+    echo "Usage: $0 {install|start|restart|stop|status|uninstall|logs}" >&2
+    exit 2
+    ;;
+esac

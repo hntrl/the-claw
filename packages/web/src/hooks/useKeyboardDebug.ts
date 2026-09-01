@@ -1,13 +1,17 @@
 import { useEffect } from "react";
 import { useDisplayStore } from "../state/displayStore";
 
-export const useKeyboardDebug = () => {
+export const useKeyboardDebug = (enabled: boolean) => {
   const debugSetStateByDigit = useDisplayStore((s) => s.debugSetStateByDigit);
   const debugInjectTranscript = useDisplayStore((s) => s.debugInjectTranscript);
   const debugAdvanceStep = useDisplayStore((s) => s.debugAdvanceStep);
   const emitEffect = useDisplayStore((s) => s.emitEffect);
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const tag = target?.tagName?.toLowerCase();
@@ -42,5 +46,5 @@ export const useKeyboardDebug = () => {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [debugAdvanceStep, debugInjectTranscript, debugSetStateByDigit, emitEffect]);
+  }, [debugAdvanceStep, debugInjectTranscript, debugSetStateByDigit, emitEffect, enabled]);
 };

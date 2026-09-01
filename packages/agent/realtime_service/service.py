@@ -302,6 +302,13 @@ class RealtimeClawVoiceService:
         self._play_audio = os.getenv(
             "AGENT_REALTIME_PLAY_AUDIO", "1"
         ).strip().lower() not in {"0", "false", "no"}
+        audio_write_timeout_raw = os.getenv(
+            "AGENT_REALTIME_AUDIO_WRITE_TIMEOUT_S", "2.0"
+        ).strip()
+        try:
+            self._audio_write_timeout_s = max(0.5, float(audio_write_timeout_raw))
+        except ValueError:
+            self._audio_write_timeout_s = 2.0
 
         self._state_lock = asyncio.Lock()
         self._queue_lock = asyncio.Lock()
@@ -600,20 +607,14 @@ class RealtimeClawVoiceService:
         async with self._text_submit_lock:
             has_inflight_tools = await self._has_inflight_tool_calls()
             is_executing = await self.is_executing()
-            has_active_turn = (
-                self._assistant_started_speaking_at > 0
-                or self._user_currently_speaking
-                or has_inflight_tools
-            )
 
-            if is_executing and has_active_turn:
+            if is_executing and has_inflight_tools:
                 self._pending_text_turns.append(normalized)
                 await self.request_interrupt()
                 return
 
-            if is_executing and not has_inflight_tools:
-                # Stale local execution state (missed stop callback): normalize.
-                await self._clear_interrupt()
+            if is_executing:
+                await self.request_interrupt()
                 await self._set_executing(False)
 
             await self._start_text_turn(normalized)
@@ -1021,13 +1022,29 @@ class RealtimeClawVoiceService:
             return
 
         try:
-            await self._audio_output.write(
-                pcm,
-                sample_rate=sample_rate,
-                dtype="int16",
-                channels=1,
+            await asyncio.wait_for(
+                self._audio_output.write(
+                    pcm,
+                    sample_rate=sample_rate,
+                    dtype="int16",
+                    channels=1,
+                ),
+                timeout=self._audio_write_timeout_s,
             )
             self._audio_error_count = 0
+        except TimeoutError:
+            self._audio_error_count += 1
+            logger.warning(
+                "Realtime audio playback timed out after %.1fs (attempt %s); retrying",
+                self._audio_write_timeout_s,
+                self._audio_error_count,
+            )
+            await self._audio_output.close()
+            if self._audio_error_count >= 3:
+                logger.warning(
+                    "Realtime audio playback timed out repeatedly; disabling speaker output"
+                )
+                self._play_audio = False
         except Exception as exc:
             self._audio_error_count += 1
             if not self._audio_error_logged:
@@ -1229,6 +1246,13 @@ class RealtimeClawVoiceService:
             return self._inflight_tool_calls > 0
 
     async def _maybe_finalize_after_tool_calls(self) -> None:
+        if self._pending_text_turns:
+            self._assistant_started_speaking_at = 0.0
+            self._user_currently_speaking = False
+            await self._clear_interrupt()
+            await self._set_executing(False)
+            await self._start_next_pending_text_turn()
+            return
         if self._assistant_started_speaking_at > 0:
             return
         if self._user_currently_speaking:

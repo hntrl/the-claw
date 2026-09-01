@@ -381,6 +381,8 @@ class LegacyProtocolClawControllerBackend(_LegacyBackedExecutionController):
         super().__init__(config, mode="serial", sim=False)
 
     async def start(self) -> None:
+        if not self._config.serial_port:
+            raise RuntimeError("no matching USB serial device found for claw controller")
         await self._legacy.start()
         is_sim = bool(getattr(self._legacy, "_sim", False))
         if is_sim:

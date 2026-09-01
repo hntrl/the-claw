@@ -1,0 +1,39 @@
+#!/bin/bash
+set -euo pipefail
+
+source_path="${BASH_SOURCE[0]}"
+while [[ -L "$source_path" ]]; do
+  source_dir="$(cd -P "$(dirname "$source_path")" && pwd)"
+  source_path="$(readlink "$source_path")"
+  [[ "$source_path" = /* ]] || source_path="$source_dir/$source_path"
+done
+
+repo_dir="$(cd -P "$(dirname "$source_path")/.." && pwd)"
+
+command="${1:-help}"
+
+case "$command" in
+  help|-h|--help)
+    cat <<'EOF'
+THE CLAW CONTROL
+
+Usage: claw <command>
+
+  start       Start the claw display service.
+  restart     Restart the claw display service.
+  stop        Stop the claw display service.
+  open        Open the claw display in the default browser.
+  status      Show whether the claw display service is running.
+  logs        Watch the service log. Press Control-C to stop watching.
+  help        Show this help message.
+
+Running `claw` with no command shows this help message.
+EOF
+    ;;
+  open)
+    exec /usr/bin/open "http://127.0.0.1:5173/?ws=ws://127.0.0.1:8787"
+    ;;
+  *)
+    exec "$repo_dir/scripts/claw-service" "$command"
+    ;;
+esac

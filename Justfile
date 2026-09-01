@@ -79,3 +79,24 @@ demo-mock:
     (cd packages/web && pnpm mock:ws) & \
     (cd packages/web && pnpm dev --host 127.0.0.1 --port 5173 --strictPort) & \
     wait
+
+claw-command-install:
+  @bash scripts/install-claw-command
+
+service-install:
+  @bash scripts/claw-service install
+
+service:
+  @bash scripts/claw-service restart
+
+service-stop:
+  @bash scripts/claw-service stop
+
+service-status:
+  @bash scripts/claw-service status
+
+service-uninstall:
+  @bash scripts/claw-service uninstall
+
+service-logs:
+  @bash scripts/claw-service logs

@@ -1,0 +1,32 @@
+#!/bin/bash
+set -euo pipefail
+
+repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
+command_dir="$HOME/.local/bin"
+command_path="$command_dir/claw"
+target="$repo_dir/scripts/claw"
+
+mkdir -p "$command_dir"
+
+if [[ -e "$command_path" && ! -L "$command_path" ]]; then
+  echo "$command_path already exists and is not a symlink; refusing to replace it." >&2
+  exit 1
+fi
+
+if [[ -L "$command_path" && "$(readlink "$command_path")" != "$target" ]]; then
+  echo "$command_path already links to a different target; refusing to replace it." >&2
+  exit 1
+fi
+
+if [[ ! -e "$command_path" && ! -L "$command_path" ]]; then
+  ln -s "$target" "$command_path"
+fi
+echo "Installed command: claw"
+
+case ":$PATH:" in
+  *":$command_dir:"*) ;;
+  *)
+    echo "Add the following to your shell profile, then open a new terminal:"
+    echo "export PATH=\"$command_dir:\$PATH\""
+    ;;
+esac
