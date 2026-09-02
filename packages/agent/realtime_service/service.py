@@ -438,7 +438,9 @@ class RealtimeClawVoiceService:
             for task in tuple(self._background_tool_tasks):
                 task.cancel()
             with contextlib.suppress(Exception):
-                await asyncio.gather(*self._background_tool_tasks, return_exceptions=True)
+                await asyncio.gather(
+                    *self._background_tool_tasks, return_exceptions=True
+                )
             self._background_tool_tasks.clear()
         if self._task is not None:
             await self._task.cancel()
@@ -782,7 +784,9 @@ class RealtimeClawVoiceService:
     async def _on_error(self, frame: ErrorFrame) -> None:
         message = str(frame.error)
         if self._is_recoverable_realtime_session_error(message):
-            logger.debug("Recovering realtime session after recoverable error: %s", message)
+            logger.debug(
+                "Recovering realtime session after recoverable error: %s", message
+            )
             await self._schedule_realtime_recovery(message)
             return
 
@@ -1193,7 +1197,9 @@ class RealtimeClawVoiceService:
             )
             self._background_tool_tasks.add(task)
             task.add_done_callback(self._background_tool_tasks.discard)
-            await params.result_callback({"ok": True, "accepted": True, "tool": tool_name})
+            await params.result_callback(
+                {"ok": True, "accepted": True, "tool": tool_name}
+            )
             return
         try:
             async with self._tool_call_lock:

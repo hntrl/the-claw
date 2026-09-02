@@ -4,7 +4,6 @@ This repo is now organized as a lightweight monorepo:
 
 - `packages/web/`: Vite + React display app
 - `packages/agent/`: Python realtime voice + tool orchestration service
-- `packages/old/`: archived previous prototype/runtime
 
 ## One-command demo
 
@@ -90,8 +89,6 @@ just agent-realtime
 just agent-demo
 just agent-mic
 just agent-realtime-mic
-just old-dev
-just old-cli
 just demo-realtime
 just demo-mic
 just demo-realtime-mic
@@ -102,4 +99,3 @@ just demo-mock
 
 - Web details: `packages/web/README.md`
 - Agent details: `packages/agent/README.md`
-- Legacy prototype: `packages/old/README.md`

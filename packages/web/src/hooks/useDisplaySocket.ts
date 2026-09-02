@@ -51,27 +51,12 @@ export const useDisplaySocket = () => {
     return true;
   }, []);
 
-  const sendAudioChunk = useCallback((chunk: Uint8Array): boolean => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      return false;
-    }
-    const payload = chunk.buffer.slice(
-      chunk.byteOffset,
-      chunk.byteOffset + chunk.byteLength,
-    );
-    ws.send(payload);
-    return true;
-  }, []);
-
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const wsFromQuery = params.get("ws");
-    const wsUrl = wsFromQuery ?? import.meta.env.VITE_DISPLAY_WS_URL;
-
-    if (!wsUrl) {
-      return;
-    }
+    const configuredUrl = wsFromQuery ?? import.meta.env.VITE_DISPLAY_WS_URL;
+    const defaultUrl = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}:8787`;
+    const wsUrl = configuredUrl || defaultUrl;
 
     let ws: WebSocket | null = null;
     let reconnectTimer: number | undefined;
@@ -140,5 +125,5 @@ export const useDisplaySocket = () => {
     };
   }, [applyEvent, flushPendingText, setWsStatus]);
 
-  return { sendRawText, sendAudioChunk };
+  return { sendRawText };
 };

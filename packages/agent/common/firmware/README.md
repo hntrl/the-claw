@@ -7,10 +7,9 @@ This directory contains the Arduino firmware used by the shared
 
 - `claw_machine_V4_agent/claw_machine_V4_agent.ino`
 
-The sketch is copied unchanged from the old tested implementation at
-`packages/old/claw_machine_V4_agent.ino`. Keep protocol changes deliberate:
-the Python backend parses `READY`, `ACK`, `DONE`, `ERR`, `EVT`, `STATE`, and
-`PONG` lines and correlates commands by optional `#<id>` prefixes.
+Keep protocol changes deliberate: the Python backend parses `READY`, `ACK`,
+`DONE`, `ERR`, `EVT`, `STATE`, and `PONG` lines and correlates commands by
+optional `#<id>` prefixes.
 
 ## Hardware Target
 

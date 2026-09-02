@@ -1,11 +1,11 @@
 # Realtime vs Legacy Agent Reconciliation
 
 ## Scope
-This document maps `packages/old/agent/app.py` behavior onto `packages/agent/realtime_service/service.py` and explains intentional departures.
+This document records how the prior prototype's behavior maps onto `packages/agent/realtime_service/service.py` and explains intentional departures.
 
 ## Tool Contract
 
-| Legacy tool (`old/agent/app.py`) | Realtime tool | Status |
+| Prior prototype tool | Realtime tool | Status |
 |---|---|---|
 | `move_axis(axis, degrees)` | `move_axis(axis, degrees)` | Preserved |
 | `open_claw(angle?)` | `open_claw(angle?)` | Preserved |

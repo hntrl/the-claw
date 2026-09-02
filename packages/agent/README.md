@@ -5,7 +5,7 @@ This directory contains the realtime Python agent backend for the display demo.
 ## What it does
 
 - Hosts a WebSocket server for the frontend on `ws://localhost:8787`.
-- Runs OpenAI Realtime voice + tool orchestration.
+- Runs OpenAI Agents SDK Realtime tool orchestration with local spoken responses.
 - Delegates claw execution to local `common/claw_controller` backend module.
 - Emits the display event contract consumed by `packages/web/src/hooks/useDisplaySocket.ts`.
 
@@ -36,15 +36,6 @@ Optional demo mode:
 ```bash
 cd packages/agent && uv run python server.py --demo
 ```
-
-Use real microphone input:
-
-```bash
-cd packages/agent && uv run python server.py --mic
-```
-
-By default, `--mic` is push-to-talk in the Python process: hold `Right Option`
-(`AGENT_MIC_PTT_KEY=alt_r`) to transmit.
 
 Frontend URL:
 
@@ -96,41 +87,19 @@ Raw text over websocket:
 - `OPENAI_API_KEY` required
 - `OPENAI_PROJECT` optional
 - `OPENAI_ORG` optional
-- `OPENAI_REALTIME_MODEL` default `gpt-realtime-2`
+- `OPENAI_REALTIME_MODEL` default `gpt-realtime-2.1`
 - `OPENAI_REALTIME_VOICE` default `marin`
-- `OPENAI_REALTIME_TURN_EAGERNESS` default `low`
-- `OPENAI_REALTIME_TURN_CREATE_RESPONSE` default `1`
-- `OPENAI_REALTIME_TURN_INTERRUPT_RESPONSE` default `0`
-- `OPENAI_REALTIME_BARGE_IN_ENABLED` default `0` (recommended on speakers; set `1` on headset)
-- `OPENAI_REALTIME_BARGE_IN_GRACE_MS` default `900`
-- `OPENAI_REALTIME_NOISE_REDUCTION` default `near_field` (`near_field` or `far_field`)
-- `OPENAI_REALTIME_SPEED` optional speaking rate for realtime voice output (recommended `1.1` to `1.4`)
-- `OPENAI_REALTIME_MIN_INPUT_AUDIO_MS` default `120`, minimum PCM depth batched before forwarding to Realtime
 - `AGENT_REALTIME_PLAY_AUDIO` default `1`
 - `AGENT_REALTIME_AUDIO_WRITE_TIMEOUT_S` default `2.0`, maximum time allowed for a local speaker write before playback is reset
 - `AGENT_AUDIO_OUTPUT_DEVICE` optional (speaker device index or exact device name)
-- `AGENT_AUDIO_INPUT_DEVICE` optional (microphone device index or exact device name)
-- `AGENT_MIC_PTT_ENABLED` default `1` (`--mic` keyboard push-to-talk gate in Python process)
-- `AGENT_MIC_PTT_KEY` default `alt_r` (uses `pynput.keyboard.Key` names, e.g. `alt_r`)
-- `MIC_SAMPLE_RATE` default `24000` (`--mic` realtime input)
-- `VAD_FRAME_MS` default `30` (`--mic` stream block size)
-
 Notes:
 - Arduino serial mode requires `pyserial` in the runtime environment.
 - In `auto` mode, startup tries serial transport and falls back to simulation if unavailable.
-- With `--mic`, incoming websocket binary audio is ignored so mic source stays the computer input device.
-
-`--mic` keyboard capture depends on `pynput` and may require accessibility/input
-monitoring permission from the OS.
+- The WebSocket accepts text messages only; binary frames are ignored.
 
 ## Interrupt behavior
 
-- The service detects speech onset during active execution.
-- On barge-in, it requests interruption and aborts the in-flight execution stage.
-- Active TTS speech is also terminated on interrupt.
-- The new utterance is then processed from the queue.
-
-Barge-in is disabled by default to prevent speaker talkback loops. Enable it with
-`OPENAI_REALTIME_BARGE_IN_ENABLED=1` (prefer headset/echo-cancelled input), and
-interruption sends `response.cancel` with best-effort truncation to the Realtime
-session.
+Submitting a newer nonempty text message interrupts the active model response and
+closes local speaker playback immediately. It prevents unstarted hardware actions,
+but does not claim to stop a command already sent to the physical controller; an
+explicit urgent stop request is handled through the `halt` tool.
