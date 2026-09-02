@@ -5,7 +5,13 @@ import contextlib
 import os
 from typing import Any
 
-from agents.realtime import RealtimeAgent, RealtimeRunner, RealtimeSession
+from agents.realtime import (
+    RealtimeAgent,
+    RealtimeRawModelEvent,
+    RealtimeRunner,
+    RealtimeSession,
+    RealtimeToolEnd,
+)
 
 from common.audio_output import LocalAudioOutput
 from common.broadcaster import DisplayBroadcaster
@@ -28,6 +34,8 @@ class RealtimeClawVoiceServiceV2:
         self._audio = LocalAudioOutput()
         self._session: RealtimeSession | None = None
         self._events: asyncio.Task[None] | None = None
+        self._pending_tool_calls = 0
+        self._agent_end_received = False
         self._coordinator = TurnCoordinator(
             cancel_response=self._cancel_response,
             start_response=self._start_turn,
@@ -99,6 +107,8 @@ class RealtimeClawVoiceServiceV2:
         await self._coordinator.interrupt()
 
     async def _start_turn(self, turn: Turn) -> None:
+        self._pending_tool_calls = 0
+        self._agent_end_received = False
         await self._emit({"type": "transcript", "text": turn.text, "isFinal": True})
         await self._emit({"type": "state", "state": "thinking"})
         await self._session_or_die().send_message(
@@ -120,13 +130,27 @@ class RealtimeClawVoiceServiceV2:
                 )
             elif event.type == "audio_interrupted":
                 await self._audio.close()
+            elif (
+                isinstance(event, RealtimeRawModelEvent)
+                and event.data.type == "function_call"
+            ):
+                self._pending_tool_calls += 1
+            elif isinstance(event, RealtimeToolEnd):
+                self._pending_tool_calls = max(0, self._pending_tool_calls - 1)
+                await self._finish_turn_after_tools()
             elif event.type == "agent_end":
-                turn = self._coordinator.current
-                if turn is not None and await self._coordinator.finish(turn.id):
-                    await self._emit({"type": "emotion_clear"})
-                    await self._emit({"type": "state", "state": "attract"})
+                self._agent_end_received = True
+                await self._finish_turn_after_tools()
             elif event.type == "error":
                 await self._reset_failed_session()
+
+    async def _finish_turn_after_tools(self) -> None:
+        if not self._agent_end_received or self._pending_tool_calls:
+            return
+        turn = self._coordinator.current
+        if turn is not None and await self._coordinator.finish(turn.id):
+            await self._emit({"type": "emotion_clear"})
+            await self._emit({"type": "state", "state": "attract"})
 
     async def _reset_failed_session(self) -> None:
         """Return the display to idle; the next text input opens a fresh session."""
