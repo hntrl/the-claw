@@ -103,3 +103,23 @@ Submitting a newer nonempty text message interrupts the active model response an
 closes local speaker playback immediately. It prevents unstarted hardware actions,
 but does not claim to stop a command already sent to the physical controller; an
 explicit urgent stop request is handled through the `halt` tool.
+
+## Hardware-free reliability checks
+
+Run the offline SDK/event replay and all Python tests:
+
+```bash
+.venv/bin/python -m unittest discover -s tests -v
+```
+
+For an opt-in live API soak, with simulated claw hardware and silent audio paced
+at playback speed:
+
+```bash
+.venv/bin/python scripts/realtime_soak.py --live --duration 210
+```
+
+The live test uses the configured API credential and incurs normal API usage.
+It does not open microphones, speakers, or serial devices. See the
+[reliability investigation](../../docs/realtime-v2-reliability.md) for reproduced
+failures, recovery behavior, and validation limits.
