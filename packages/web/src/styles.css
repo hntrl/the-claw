@@ -411,10 +411,11 @@ body {
 }
 
 .keyboard-dialog--screen {
+  inset: 0 0 30%;
   z-index: 7;
   display: grid;
   place-items: end center;
-  padding: 0 5.6% 2.8%;
+  padding: 0 5.6%;
 }
 
 .keyboard-dialog__line {
@@ -725,7 +726,7 @@ body {
   }
 
   .keyboard-dialog--screen {
-    padding: 0 5.4% 3.4%;
+    padding-inline: 5.4%;
   }
 
   .keyboard-dialog__line {
