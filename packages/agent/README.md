@@ -91,6 +91,10 @@ Raw text over websocket:
 - `OPENAI_REALTIME_VOICE` default `marin`
 - `AGENT_REALTIME_PLAY_AUDIO` default `1`
 - `AGENT_REALTIME_AUDIO_WRITE_TIMEOUT_S` default `2.0`, maximum time allowed for a local speaker write before playback is reset
+- `AGENT_REALTIME_RECONNECT_INITIAL_S` default `0.25`, delay after the first failed reconnect attempt
+- `AGENT_REALTIME_RECONNECT_MAX_S` default `5.0`, maximum exponential reconnect delay
+- `AGENT_REALTIME_CONNECT_TIMEOUT_S` default `15.0`, maximum session connection/setup time
+- `AGENT_REALTIME_CLOSE_TIMEOUT_S` default `3.0`, maximum failed-session cleanup time
 - `AGENT_AUDIO_OUTPUT_DEVICE` optional (speaker device index or exact device name)
 Notes:
 - Arduino serial mode requires `pyserial` in the runtime environment.

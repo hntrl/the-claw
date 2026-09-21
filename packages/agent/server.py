@@ -72,7 +72,6 @@ async def run(args: argparse.Namespace) -> None:
 
     async def handle_client(websocket: websockets.WebSocketServerProtocol) -> None:
         await broadcaster.add_client(websocket)
-        await websocket.send(json.dumps({"type": "state", "state": "attract"}))
         input_tasks: set[asyncio.Task[None]] = set()
 
         def report_input_task(task: asyncio.Task[None]) -> None:
@@ -86,6 +85,10 @@ async def run(args: argparse.Namespace) -> None:
 
         warned_binary = False
         try:
+            await asyncio.wait_for(
+                websocket.send(json.dumps({"type": "state", "state": "attract"})),
+                timeout=2.0,
+            )
             async for message in websocket:
                 if not isinstance(message, str):
                     if not warned_binary:
@@ -101,7 +104,7 @@ async def run(args: argparse.Namespace) -> None:
                     )
                     input_tasks.add(task)
                     task.add_done_callback(report_input_task)
-        except (ConnectionClosed, OSError):
+        except (ConnectionClosed, OSError, asyncio.TimeoutError):
             pass
         finally:
             for task in input_tasks:

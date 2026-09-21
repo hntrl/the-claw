@@ -38,6 +38,8 @@ class RealtimeClawVoiceServiceV2:
         self._audio = LocalAudioOutput()
         self._session: RealtimeSession | None = None
         self._events: asyncio.Task[None] | None = None
+        self._transport_watch: asyncio.Task[None] | None = None
+        self._reconnect_task: asyncio.Task[None] | None = None
         self._session_lock = asyncio.Lock()
         self._controller_started = False
         self._stopping = False
@@ -54,6 +56,19 @@ class RealtimeClawVoiceServiceV2:
         }
         self._audio_timeout = max(
             0.1, float(os.getenv("AGENT_REALTIME_AUDIO_WRITE_TIMEOUT_S", "2.0"))
+        )
+        self._reconnect_initial_delay_s = max(
+            0.01, float(os.getenv("AGENT_REALTIME_RECONNECT_INITIAL_S", "0.25"))
+        )
+        self._reconnect_max_delay_s = max(
+            self._reconnect_initial_delay_s,
+            float(os.getenv("AGENT_REALTIME_RECONNECT_MAX_S", "5.0")),
+        )
+        self._connect_timeout_s = max(
+            1.0, float(os.getenv("AGENT_REALTIME_CONNECT_TIMEOUT_S", "15.0"))
+        )
+        self._session_close_timeout_s = max(
+            0.5, float(os.getenv("AGENT_REALTIME_CLOSE_TIMEOUT_S", "3.0"))
         )
         self._coordinator = TurnCoordinator(
             cancel_response=self._cancel_response,
@@ -115,13 +130,14 @@ class RealtimeClawVoiceServiceV2:
         if not self._controller_started:
             await self._controller.start()
             self._controller_started = True
+        model = TurnAwareRealtimeModel(
+            self._current_turn_id,
+            lambda call_id: self._tool_turns.pop(call_id, None),
+            self._coordinator.is_current,
+        )
         runner = RealtimeRunner(
             self._agent,
-            model=TurnAwareRealtimeModel(
-                self._current_turn_id,
-                lambda call_id: self._tool_turns.pop(call_id, None),
-                self._coordinator.is_current,
-            ),
+            model=model,
             config={
                 "model_settings": {
                     "model_name": os.getenv(
@@ -141,32 +157,46 @@ class RealtimeClawVoiceServiceV2:
         session = await runner.run()
         session.model.add_listener(self)
         try:
-            await session.enter()
+            await asyncio.wait_for(session.enter(), timeout=self._connect_timeout_s)
         except BaseException:
             session.model.remove_listener(self)
-            await session.close()
+            await self._close_session(session)
             raise
         self._session = session
         self._response_turns.clear()
         self._tool_turns.clear()
         await self._coordinator.start()
         self._events = asyncio.create_task(self._bridge_events(session))
+        self._transport_watch = asyncio.create_task(
+            self._watch_transport(session, model)
+        )
 
     async def stop(self) -> None:
         self._stopping = True
-        await self._coordinator.stop()
-        if self._events:
-            self._events.cancel()
-            await asyncio.gather(self._events, return_exceptions=True)
-            self._events = None
-        await self._close_audio()
-        if self._session:
-            self._session.model.remove_listener(self)
-            with contextlib.suppress(Exception):
-                await self._session.close()
-            self._session = None
-        await self._controller.stop()
-        self._controller_started = False
+        reconnect_task = self._reconnect_task
+        self._reconnect_task = None
+        if reconnect_task:
+            reconnect_task.cancel()
+            await asyncio.gather(reconnect_task, return_exceptions=True)
+        async with self._session_lock:
+            transport_watch = self._transport_watch
+            self._transport_watch = None
+            await self._coordinator.stop()
+            if self._events:
+                self._events.cancel()
+                await asyncio.gather(self._events, return_exceptions=True)
+                self._events = None
+            await self._close_audio()
+            if self._session:
+                session = self._session
+                self._session = None
+                session.model.remove_listener(self)
+                await self._close_session(session)
+            await self._tools.drain(timeout_s=2.0)
+            await self._controller.stop()
+            self._controller_started = False
+        if transport_watch:
+            await asyncio.gather(transport_watch, return_exceptions=True)
 
     async def submit_raw_text(self, text: str, *, source: str = "text") -> None:
         del source
@@ -204,6 +234,42 @@ class RealtimeClawVoiceServiceV2:
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(self._session.interrupt(), timeout=2.0)
         await self._emit({"type": "emotion_clear"})
+
+    def _schedule_reconnect(self) -> None:
+        if self._stopping or self._session is not None:
+            return
+        if self._reconnect_task is not None and not self._reconnect_task.done():
+            return
+        self._reconnect_task = asyncio.create_task(self._reconnect_until_ready())
+
+    async def _reconnect_until_ready(self) -> None:
+        delay_s = self._reconnect_initial_delay_s
+        while not self._stopping and self._session is None:
+            try:
+                await self.start()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "Realtime reconnect failed error_type=%s retry_in_s=%.2f",
+                    type(exc).__name__,
+                    delay_s,
+                )
+            else:
+                if self._session is not None:
+                    logger.info("Realtime session reconnected")
+                    return
+            await asyncio.sleep(delay_s)
+            delay_s = min(self._reconnect_max_delay_s, delay_s * 2)
+
+    async def _watch_transport(
+        self, session: RealtimeSession, model: TurnAwareRealtimeModel
+    ) -> None:
+        await model.transport_closed.wait()
+        if self._stopping or self._session is not session:
+            return
+        logger.warning("Realtime transport listener stopped; resetting session")
+        await self._reset_failed_session(session)
 
     async def _bridge_events(self, session: RealtimeSession) -> None:
         try:
@@ -302,10 +368,21 @@ class RealtimeClawVoiceServiceV2:
         except Exception as exc:
             logger.warning("Speaker close failed error_type=%s", type(exc).__name__)
 
+    async def _close_session(self, session: RealtimeSession) -> None:
+        try:
+            await asyncio.wait_for(
+                session.close(), timeout=self._session_close_timeout_s
+            )
+        except Exception as exc:
+            logger.warning(
+                "Realtime session close failed error_type=%s", type(exc).__name__
+            )
+
     async def _reset_failed_session(
         self, failed_session: RealtimeSession | None
     ) -> None:
-        """Return the display to idle; the next text input opens a fresh session."""
+        """Close a failed session and immediately begin reconnecting."""
+        reset = False
         async with self._session_lock:
             if self._session is not failed_session:
                 return
@@ -315,12 +392,14 @@ class RealtimeClawVoiceServiceV2:
             self._tool_turns.clear()
             if failed_session is not None:
                 failed_session.model.remove_listener(self)
-                with contextlib.suppress(Exception):
-                    await failed_session.close()
+                await self._close_session(failed_session)
             await self._emit({"type": "state", "state": "error"})
             await self._emit({"type": "effect", "effect": "error"})
             await self._emit({"type": "emotion_clear"})
             await self._emit({"type": "state", "state": "attract"})
+            reset = True
+        if reset:
+            self._schedule_reconnect()
 
     def _has_active_turn(self) -> bool:
         invoking_turn = self._invoking_turn.get()

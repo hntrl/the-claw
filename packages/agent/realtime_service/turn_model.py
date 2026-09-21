@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any
@@ -42,7 +43,16 @@ class TurnAwareRealtimeModel(OpenAIRealtimeWebSocketModel):
         self._tool_responses: dict[str, str] = {}
         self._finished_responses: dict[str, ToolResponse] = {}
         self._sent_tool_outputs: set[str] = set()
+        self.transport_closed = asyncio.Event()
         self.add_listener(self)
+
+    async def _listen_for_messages(self) -> None:
+        try:
+            await super()._listen_for_messages()
+        finally:
+            # The SDK intentionally suppresses clean WebSocket closure. Surface all
+            # listener exits so the service cannot retain a false-healthy session.
+            self.transport_closed.set()
 
     async def on_event(self, event: Any) -> None:
         if event.type != "raw_server_event":

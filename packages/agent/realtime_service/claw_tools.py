@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, Literal
@@ -29,6 +30,7 @@ class ClawToolbox:
         self._emit = emit
         self._is_current = is_current
         self._hardware_lock = asyncio.Lock()
+        self._hardware_tasks: set[asyncio.Task[dict[str, Any]]] = set()
         z_degrees_per_foot = float(os.getenv("CLAW_Z_DEGREES_PER_FOOT", "360"))
         self._default_lower = float(
             os.getenv("CLAW_DEFAULT_LOWER_DEGREES", str(z_degrees_per_foot * 3))
@@ -152,10 +154,13 @@ class ClawToolbox:
         await self._emit(
             {"type": "agent_step", "step": "claw_execute", "status": "active"}
         )
-        async with self._hardware_lock:
-            if not self._is_current():
-                return {"ok": False, "error": "turn_interrupted"}
-            result = await command()
+        execution = asyncio.create_task(self._run_physical(command))
+        self._hardware_tasks.add(execution)
+        execution.add_done_callback(self._hardware_done)
+        # SDK session cleanup cancels tool coroutines. The controller command may
+        # already be on the wire, so keep its lock-owning task alive to prevent a
+        # replacement session from issuing overlapping hardware commands.
+        result = await asyncio.shield(execution)
         status = "complete" if result.get("ok") else "error"
         await self._emit(
             {"type": "agent_step", "step": "claw_execute", "status": status}
@@ -164,6 +169,32 @@ class ClawToolbox:
             {"type": "agent_step", "step": "result_evaluate", "status": status}
         )
         return result
+
+    async def _run_physical(
+        self, command: Callable[[], Awaitable[dict[str, Any]]]
+    ) -> dict[str, Any]:
+        async with self._hardware_lock:
+            if not self._is_current():
+                return {"ok": False, "error": "turn_interrupted"}
+            return await command()
+
+    def _hardware_done(self, task: asyncio.Task[dict[str, Any]]) -> None:
+        self._hardware_tasks.discard(task)
+        with contextlib.suppress(BaseException):
+            task.result()
+
+    async def drain(self, *, timeout_s: float) -> None:
+        if not self._hardware_tasks:
+            return
+        _, pending = await asyncio.wait(
+            tuple(self._hardware_tasks), timeout=max(0.0, timeout_s)
+        )
+        for task in pending:
+            task.cancel()
+        if pending:
+            # A controller implementation may suppress cancellation while unwinding.
+            # Shutdown must remain bounded even in that failure mode.
+            await asyncio.wait(pending, timeout=0.5)
 
     async def _motion(self, direction: str, speed: float) -> None:
         await self._emit(

@@ -104,8 +104,17 @@ async def settle():
 class ServiceReplayTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.sockets = []
+        self.connect_failures = []
+        self.hanging_connect_attempts = 0
+        self.connect_attempts = 0
 
         async def connect(**kwargs):
+            self.connect_attempts += 1
+            if self.hanging_connect_attempts:
+                self.hanging_connect_attempts -= 1
+                await asyncio.Event().wait()
+            if self.connect_failures:
+                raise self.connect_failures.pop(0)
             socket = FakeSocket()
             self.sockets.append(socket)
             return socket
@@ -180,27 +189,105 @@ class ServiceReplayTests(unittest.IsolatedAsyncioTestCase):
             len(requests), 2, "surplus tool continuations leak into subsequent turns"
         )
 
-    async def test_send_failure_does_not_permanently_kill_command_worker(self):
+    async def test_send_failure_triggers_one_immediate_reconnect(self):
         self.sockets[0].send_error = ConnectionResetError("injected send failure")
         await self.submit("first")
-        await self.submit("second")
+        async with asyncio.timeout(1):
+            while len(self.sockets) < 2 or self.service._session is None:
+                await asyncio.sleep(0)
+        await settle()
         self.assertFalse(
             self.service._coordinator._task.done(), "command worker died permanently"
         )
-        self.assertGreater(len(self.sockets), 1, "failed session was never replaced")
+        self.assertEqual(len(self.sockets), 2, "send failure created a reconnect storm")
+        await self.submit("second")
         self.assertTrue(
             any("second" in json.dumps(event) for event in self.sockets[-1].sent)
         )
 
-    async def test_receive_failure_reconnects_for_later_input(self):
+    async def test_receive_failure_triggers_one_immediate_reconnect(self):
         socket = await self.submit()
         socket.incoming.put_nowait(ConnectionResetError("injected receive failure"))
+        async with asyncio.timeout(1):
+            while len(self.sockets) < 2 or self.service._session is None:
+                await asyncio.sleep(0)
         await settle()
+        self.assertEqual(len(self.sockets), 2, "failure created a reconnect storm")
         await self.submit("second")
-        self.assertGreater(
-            len(self.sockets), 1, "dead event bridge retained a failed session"
-        )
         self.assertFalse(self.service._events.done())
+
+    async def test_clean_transport_close_reconnects_before_later_input(self):
+        socket = await self.submit()
+        await socket.close()
+        async with asyncio.timeout(1):
+            while len(self.sockets) < 2 or self.service._session is None:
+                await asyncio.sleep(0)
+        self.assertEqual(
+            len(self.sockets), 2, "clean transport close did not reconnect immediately"
+        )
+        await self.submit("second")
+        self.assertTrue(
+            any("second" in json.dumps(event) for event in self.sockets[-1].sent)
+        )
+        replacement = self.sockets[-1]
+        replacement.created("r2")
+        replacement.audio("r2")
+        replacement.done("r2")
+        await settle()
+        self.audio.write.assert_awaited_once()
+        self.assertIsNone(self.service._coordinator.current)
+        self.assertFalse(self.service._events.done())
+
+    async def test_reconnect_retries_transient_connection_failure(self):
+        socket = await self.submit()
+        self.service._reconnect_initial_delay_s = 0.001
+        self.connect_failures.append(ConnectionResetError("reconnect failed once"))
+        await socket.close()
+        async with asyncio.timeout(1):
+            while len(self.sockets) < 2 or self.service._session is None:
+                await asyncio.sleep(0)
+        self.assertEqual(len(self.connect_failures), 0)
+        self.assertFalse(self.service._events.done())
+
+    async def test_reconnect_times_out_hung_connection_attempt(self):
+        socket = await self.submit()
+        self.service._connect_timeout_s = 0.01
+        self.service._reconnect_initial_delay_s = 0.001
+        self.hanging_connect_attempts = 1
+        await socket.close()
+        async with asyncio.timeout(1):
+            while len(self.sockets) < 2 or self.service._session is None:
+                await asyncio.sleep(0)
+        self.assertGreaterEqual(self.connect_attempts, 3)
+        self.assertFalse(self.service._events.done())
+
+    async def test_stop_cancels_reconnect_backoff(self):
+        socket = await self.submit()
+        self.service._reconnect_initial_delay_s = 0.01
+        self.service._reconnect_max_delay_s = 0.01
+        self.connect_failures.extend(
+            ConnectionResetError(f"reconnect failure {n}") for n in range(20)
+        )
+        await socket.close()
+        async with asyncio.timeout(1):
+            while self.connect_attempts < 2:
+                await asyncio.sleep(0)
+        await self.service.stop()
+        attempts_after_stop = self.connect_attempts
+        await asyncio.sleep(0.03)
+        self.assertEqual(self.connect_attempts, attempts_after_stop)
+        self.assertIsNone(self.service._session)
+
+    async def test_stop_racing_transport_close_finishes_cleanup(self):
+        socket = await self.submit()
+        session = self.service._session
+        await asyncio.wait_for(
+            asyncio.gather(socket.close(), self.service.stop()), timeout=2.0
+        )
+        self.assertIsNone(self.service._session)
+        self.assertIsNone(session.model._websocket_task)
+        await settle()
+        self.assertEqual(len(self.sockets), 1, "shutdown unexpectedly reconnected")
 
     async def test_speaker_failure_does_not_kill_event_bridge(self):
         socket = await self.submit()
@@ -243,6 +330,35 @@ class ServiceReplayTests(unittest.IsolatedAsyncioTestCase):
         socket.done("r2")
         await settle()
         self.audio.write.assert_awaited_once()
+
+    async def test_session_failure_does_not_release_in_flight_hardware_lock(self):
+        release = asyncio.Event()
+        self.addCleanup(release.set)
+
+        async def blocked_open(angle):
+            await release.wait()
+            return {"ok": True}
+
+        self.controller.open_claw.side_effect = blocked_open
+        first_socket = await self.submit("open")
+        first_socket.created("r1")
+        first = first_socket.tool("r1", "c1")
+        first_socket.done("r1", output=[first])
+        await settle()
+        self.controller.open_claw.assert_awaited_once()
+
+        first_socket.incoming.put_nowait(ConnectionResetError("transport failed"))
+        await settle()
+        second_socket = await self.submit("close")
+        second_socket.created("r2")
+        second = second_socket.tool("r2", "c2", "close_claw")
+        second_socket.done("r2", output=[second])
+        await settle()
+        self.controller.close_claw.assert_not_awaited()
+
+        release.set()
+        await settle()
+        self.controller.close_claw.assert_awaited_once()
 
     async def test_old_tool_waiting_for_controller_cannot_run_in_new_turn(self):
         release = asyncio.Event()
@@ -331,6 +447,30 @@ class ServiceReplayTests(unittest.IsolatedAsyncioTestCase):
         socket.done("r2")
         await settle()
         self.audio.write.assert_awaited_once()
+
+    async def test_submit_racing_stop_restarts_after_controller_teardown(self):
+        stop_entered = asyncio.Event()
+        allow_stop = asyncio.Event()
+        self.addCleanup(allow_stop.set)
+
+        async def blocked_stop():
+            stop_entered.set()
+            await allow_stop.wait()
+
+        self.controller.stop.side_effect = blocked_stop
+        stop_task = asyncio.create_task(self.service.stop())
+        await asyncio.wait_for(stop_entered.wait(), timeout=1.0)
+        submit_task = asyncio.create_task(self.service.submit_raw_text("replacement"))
+        await settle()
+        self.assertEqual(len(self.sockets), 1)
+
+        allow_stop.set()
+        await asyncio.wait_for(asyncio.gather(stop_task, submit_task), timeout=2.0)
+        await settle()
+        self.assertEqual(len(self.sockets), 2)
+        self.assertEqual(self.controller.start.await_count, 2)
+        self.assertIsNotNone(self.service._session)
+        self.assertFalse(self.service._events.done())
 
     async def test_concurrent_start_creates_one_connection(self):
         await self.service.stop()

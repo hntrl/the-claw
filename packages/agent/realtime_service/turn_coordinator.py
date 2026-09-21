@@ -59,9 +59,15 @@ class TurnCoordinator:
     async def interrupt(self) -> None:
         if self._turn is None:
             return
-        self._turn = Turn(self._turn.id, self._turn.text, TurnPhase.INTERRUPTING)
+        interrupted_id = self._turn.id
+        self._turn = Turn(interrupted_id, self._turn.text, TurnPhase.INTERRUPTING)
         await self._cancel_response()
-        self._turn = None
+        if (
+            self._turn is not None
+            and self._turn.id == interrupted_id
+            and self._turn.phase == TurnPhase.INTERRUPTING
+        ):
+            self._turn = None
 
     def is_current(self, turn_id: int) -> bool:
         return (

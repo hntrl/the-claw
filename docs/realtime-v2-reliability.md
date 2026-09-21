@@ -15,7 +15,11 @@ not a three-minute limit.
 | --- | --- | --- |
 | Socket send raises once | Exception escapes the turn callback and permanently kills `TurnCoordinator._run`; later input is queued with no consumer. | Handle the failed send, invalidate and close the failed session, and retain the command worker for later input. Never automatically replay an uncertain hardware command. |
 | Socket receive fails | The SDK raises from its async iterator. The service only handled `error` events, so its event task dies while `_session` remains non-null. | Catch iterator failures and close the specific failed session; later input creates a new session. |
+| Socket closes cleanly | The SDK suppresses a normal WebSocket close and leaves the session iterator blocked, so later input reuses a false-healthy session forever. | Surface every model-listener exit through a transport watchdog, invalidate the dead session, and immediately reconnect with bounded exponential backoff. |
 | Speaker write raises or stalls | An exception kills the event bridge; an unbounded write can prevent it from consuming control events. | Honor the audio-enable and write-timeout settings; isolate speaker failures and disable output while continuing model/tool processing. |
+| Display client send stalls | A half-dead browser connection blocks every model, tool, and recovery event because broadcasts are sequential and unbounded. | Send concurrently with a per-client timeout; evict and close failed clients. Bound the initial server send as well. |
+| Two interrupts overlap | A late interrupt unconditionally clears a newer replacement turn. | Clear only the same turn generation that the interrupt started against. |
+| Session fails during a hardware command | SDK cleanup cancels the tool coroutine and releases its lock even though the physical command may still be running. | Keep the controller command in a service-owned shielded task that retains serialization across session replacement; bound shutdown cleanup. |
 | A tool call ends its model response | `agent_end` plus `tool_end` marks the entire user turn complete before the SDK's tool-result continuation. Its speech is dropped and further tools can be rejected. | Finish on a final `response.done` without function calls, not on the SDK's per-response `agent_end`. |
 | Old response ends after replacement input | The old event finishes whichever turn is current. This also occurs if the first response acknowledgment arrives after replacement input. | Tag outgoing responses with `claw_turn_id` metadata and check ownership on receipt and completion. |
 | Old tool waits for the controller lock during replacement | The eligibility callback checks whether *any* turn is active, so the old tool can execute as part of the new turn. | Bind tool-call IDs to their originating turn and propagate that identity through the controller wait and display events; suppress stale continuations. |
@@ -46,7 +50,7 @@ multiple tool results sharing one continuation, and 50
 consecutive turns containing 100 tool calls and 50 audio responses.
 
 Validated with the lockfile versions: `openai-agents==0.20.0`, `openai==2.54.0`,
-and `websockets==15.0.1`. The full Python suite contains 22 passing tests.
+and `websockets==15.0.1`. The full Python suite contains 31 passing tests.
 
 ## Live reproduction without devices
 
@@ -80,7 +84,18 @@ Live validation checks ordinary tool conversations; injected failure
 and interruption scenarios are covered by deterministic replay. Neither test
 exercises an actual audio driver, serial link, or the original network conditions.
 
-Recovery creates a fresh conversation after a fatal session failure. It does
-not preserve the failed session's conversation history. After a speaker failure,
+Recovery immediately creates a fresh conversation after a fatal session failure,
+retrying with bounded exponential backoff until connected. It does not preserve the
+failed session's conversation history. After a speaker failure,
 tools/text remain usable but speaker output stays disabled until the service is
 restarted.
+
+## Remaining risks
+
+The service detects transport termination but does not yet impose a response-progress
+deadline when a socket remains open and silent. The live soak continuously sends
+commands; add an idle-for-more-than-180-seconds phase followed by a complete tool and
+audio turn to test infrastructure idle policies. Emergency `halt` is also currently
+serialized behind the hardware-command lock, so a controller command that never
+returns can delay the stop command; that safety path should be separated from ordinary
+hardware serialization.
